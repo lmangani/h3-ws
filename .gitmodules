@@ -1,0 +1,3 @@
+[submodule "third_party/h3.c"]
+	path = third_party/h3.c
+	url = https://github.com/antirez/h3.c.git

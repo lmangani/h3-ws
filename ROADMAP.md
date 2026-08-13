@@ -1,0 +1,259 @@
+# h3-ws roadmap
+
+Local **MiniMax-H3** video+audio generation on Apple Silicon — Web UI, CLI, and MCP over a single WebSocket server — with **[h3.c](https://github.com/antirez/h3.c)** as the Metal inference engine.
+
+This is a parallel of [ltx-ws](https://github.com/audiohacking/ltx-ws): **same UI/UX shell**, **new model surface**. Do not port LTX LoRAs, pipeline profiles, or frame math. Rebuild options from the h3.c CLI and MiniMax-H3 checkpoints.
+
+---
+
+## Product intent
+
+| Keep from ltx-ws | Rebuild for H3 |
+|------------------|----------------|
+| Browser generate + library + progress | Modes, resolution, duration, quality controls |
+| One-job-at-a-time WS server on `:8765` | Native `h3` process (not in-process Python MLX) |
+| CLI + MCP clients | H3 flags, checkpoints, prompting |
+| Multi-clip chains + merge | Last-frame → `--first-frame`; optional Ref2VA continue |
+| Apple Silicon only | Metal / MPSGraph / TensorOps via h3.c |
+
+**Not in v1:** LoRA picker, face swap, IC-LoRA, LipDub, ID-LoRA, LTX retake/extend pipelines, CFG/STG, distilled vs HQ profiles, H3-Regenerate-2K (unreleased), hosted H3-Context-IR.
+
+---
+
+## Engine facts (source of truth)
+
+Upstream: [antirez/h3.c](https://github.com/antirez/h3.c) (`h3-metal`). Weights: [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) (`FL2VA/` and `Ref2VA/` trees).
+
+| Constraint | Rule |
+|------------|------|
+| Output | Joint **video + 32 kHz stereo audio**, 24 fps |
+| Canvas | Width and height multiples of **32**; product ≤ **768×1344** |
+| Temporal shape | Frames snap **up** to `5 + 17n` (22, 39, 56, 107, 243, 362, …) |
+| Checkpoints | **FL2VA** (text / first / last frame) and **Ref2VA** (ordered image/video/audio refs) are **distinct** and **must not mix** in one run |
+| Memory | ~33 GB transformer; ~40 GB peak physical on M5 Max full-residency; `--ssd-streaming` drops tracked DiT storage to ~2 GiB |
+| Validated sizes | `512×512` (dev), `768×768`, `1344×768` / `768×1344`, `1024×768` / `768×1024`; `256×256` is a fast preview only |
+| Hardware | Built for M3 Max / M5 Max; int8 MLP + TensorOps are M5 defaults |
+
+`--steps` is always the number of denoising **passes**. `--reuse` and `--core-reuse` are mutually exclusive. `--seconds` and `--frames` are mutually exclusive.
+
+---
+
+## Architecture
+
+```
+  Web UI (React)     CLI          MCP
+        │             │            │
+        └─────────────┼────────────┘
+                      │  HTTP + WS  (ltx-ws protocol shapes)
+                      ▼
+              server.py / web_ui.py
+              job queue · library · snap/validate
+                      │
+                      ▼
+              h3_backend.py  (process manager)
+                      │
+           ┌──────────┴──────────┐
+           ▼                     ▼
+    resident `./h3`         one-shot `./h3 -p … -o`
+    (warm FL2VA session)    (Ref2VA / cold / isolation)
+           │
+           ▼
+    third_party/h3.c  →  Metal / MPSGraph
+    models/MiniMax-H3/{FL2VA,Ref2VA}
+```
+
+**Why a subprocess, not Python MLX:** h3.c is the production Metal engine. The Python layer only orchestrates jobs, the library, and the UI — same split as ltx-ws vs `ltx_pipelines_mlx`, except the model never lives in the Python process.
+
+**Warm session (P5):** h3.c’s interactive mode keeps BF16 prompt conditioning, prepared DiT, and the video decoder resident. First generate pays load cost; repeats with a new seed do not. Target this for FL2VA (t2va + first/last + autocontinue). Ref2VA loads a different transformer — switch or spawn, never mix anchors with refs.
+
+**Optional later:** [PipeNetwork/minimax-h3-mlx](https://github.com/PipeNetwork/minimax-h3-mlx) as a Python MLX fallback. Not v1.
+
+---
+
+## Mode mapping (ltx-ws → h3-ws)
+
+| ltx-ws mode | h3-ws v1 | h3.c path |
+|-------------|----------|-----------|
+| Text to video | **t2va** | FL2VA, prompt only |
+| Image to video | **first-frame** | `--first-frame` / `!first` |
+| Keyframe interpolation | **first+last** | `--first-frame` + `--last-frame` |
+| V2V / extend (approx.) | **ref-video** | `--ref-silent-video` or `--ref-video` (Ref2VA) |
+| Audio to video | **ref-av** | `--ref-audio` **plus** an image or video ref (audio cannot stand alone) |
+| Autocontinue chain | **autocontinue** | last decoded frame → next `--first-frame` |
+| Retake | **drop** | no native region-edit |
+| IC-LoRA / LipDub / face swap / ID-LoRA | **drop** | no LoRA; identity-ish work uses Ref2VA refs |
+| Native LTX extend | **later** | closest is Ref2VA continue, not in-place latent extend |
+
+UI generation modes for v1:
+
+1. `t2va` — Text to video+audio
+2. `first_frame` — First frame → video
+3. `last_frame` — Last frame → video
+4. `fl2va` — First and last frame
+5. `ref2va` — Ordered references (images / video / audio)
+
+---
+
+## Settings surface (replace LoRA + pipeline profiles)
+
+### Quality presets (replace `pipeline_profiles`)
+
+| id | Label | `--steps` | `--layers` | `--reuse` | Extra |
+|----|-------|-----------|------------|-----------|--------|
+| `four_step` | Four-step | 4 | 50 | 1 | Keep reuse 1 at small budgets |
+| `aggressive` | Aggressive preview | 20 | 40 | 3 | Internal `320` for `512` output; **no** token-reduction with this combo |
+| `fast` | Fast | 20 | 45 | 2 | Optional `--token-reduction` |
+| `balanced` | Balanced (UI default) | 20 | 45 | 2 | Tutorial “validated balanced” |
+| `close` | Close / reference | 50 | 50 | 1 | Slow oracle |
+
+Advanced (collapsed, not on the first row): `--core-reuse` (exclusive with reuse), `--token-reduction`, `--render-width` / `--render-height`, `--ssd-streaming`, `--use-int8-row-fc2` (M5), slower BF16 diagnostic flags only in CLI/env.
+
+### Resolution presets
+
+| Canvas | Role |
+|--------|------|
+| 256×256 | Fast composition preview (auto RoPE adapt; no token-reduction) |
+| 512×512 | Default / safest |
+| 768×768 | Square 768p |
+| 1024×768 / 768×1024 | 4:3 / 3:4 |
+| 1344×768 / 768×1344 | Landscape / portrait 768p limit |
+
+### Duration presets (`5 + 17n` @ 24 fps)
+
+| Request | Frames | Actual |
+|---------|--------|--------|
+| ~0.9 s (dev) | 22 | 0.917 s |
+| ~1.6 s | 39 | 1.625 s |
+| ~2.3 s | 56 | 2.333 s |
+| ~4.5 s | 107 | 4.458 s |
+| ~10 s | 243 | 10.125 s |
+| ~15 s | 362 | 15.083 s |
+
+Released workflow is **~4–15 s**. Short clips are for iteration.
+
+### Server flags (v1)
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--host` / `--port` | `0.0.0.0` / `8765` | Web UI + `/ws` |
+| `--h3-bin` | `third_party/h3.c/h3` | Built binary |
+| `--model-dir` | `./models/MiniMax-H3` | HF snapshot with `FL2VA/` + `Ref2VA/` |
+| `--quality` | `balanced` | Preset above |
+| `--width` / `--height` | `512` / `512` | Snap to ×32; enforce pixel cap |
+| `--frames` or `--seconds` | 22 frames | Snap to `5+17n` |
+| `--ssd-streaming` | off; auto-hint below ~64 GB RAM | Memory/speed tradeoff |
+| `--web-output-dir` | `./web_outputs` | Library |
+| `--no-web-ui` | off | WS only |
+
+---
+
+## Implementation phases
+
+**P0–P4 in tree (this checkout).** P5+ still ahead.
+
+### P0 — Scaffold
+
+Done: repo layout, gitignore, `third_party/h3.c` submodule, React chrome without LoRA, `requirements.txt`.
+
+### P1 — Engine bootstrap
+
+Done: `scripts/build_h3.sh`, `scripts/download_model.py`, `h3 --info` via `H3Engine.info()`, FFmpeg check, RAM probe → SSD-streaming hint.
+
+### P2 — First generate (one-shot)
+
+Done: `h3_backend.py` one-shot spawn, WS framing, `/api/generate` + library + SSE, default 512×512 / 22 frames / balanced.
+
+### P3 — H3 settings in the UI
+
+Done: quality presets, seed, resolution, duration, steps, token-reduction, SSD streaming. Layers / core-reuse / internal render size remain CLI/body advanced (P8 polish).
+
+### P4 — FL2VA image modes + autocontinue
+
+Done: first/last/fl2va uploads, library-frame capture, clip ×N last-frame chain + autoconcat.
+
+### P5 — Resident `h3` session
+
+- Keep one interactive `./h3 -d …` process; drive via stdin (`prompt`, `!seed`, `!first`, `!seconds`, `!save`)
+- Parse session directory / output paths; stream the saved MP4 over WS
+- Recycle the process on crash; never share one stdin across overlapping jobs
+- Progress: parse `--profile` / step logs into existing SSE `model_progress` (`step` / `total` / `eta_s`)
+- Warm FL2VA is the default path; one-shot remains the fallback
+
+### P6 — Ref2VA
+
+**UI (one-shot) is in tree:** ordered ref list under the prompt (image / silent video / video / video+audio / audio), Picture N / Video N tokens, mutual exclusion with first/last-frame, documented canvas dropdown.
+
+Still remaining for the warm session:
+
+- Switching FL2VA ↔ Ref2VA: tear down or swap the resident process (do not mix `!first` with `!ref-image`)
+- Audio duration checks (2–15 s each, total ≤15 s) at ingest time
+
+### P7 — CLI + MCP + agent docs
+
+- CLI client (protocol-compatible with the WS server): prompt, image, refs, quality, frames, count, autocontinue, autoconcat
+- MCP: `h3_server_healthcheck`, `h3_generate_video`, `h3_generate_sequence`
+- `AGENTS.md` / `DIRECTOR.md` / `CLAUDE.md`: Context-IR-style prompts (subject, action, camera, look, **audio**), H3 frame math, no LTX LoRA advice
+- `Start H3-WS.command` double-click launcher
+
+### P8 — Hardening
+
+- Tests: snap_frames `5+17n`, canvas limits, preset expansion, FL2VA vs Ref2VA mutual exclusion, queue fairness
+- Frontend hot reload (`web` Vite :5299 → :8765) like ltx-ws
+- Benchmark script wrapping `h3 --profile`
+- Document M3 vs M5 paths (int8 default, TensorOps, ssd-streaming)
+
+---
+
+## Prompting (DIRECTOR.md seed)
+
+H3 expects a Context-IR-like description, not a three-word caption. Gold prompt skeleton:
+
+```
+Scene: …
+Action: …
+Camera: …
+Look: …
+Audio: …
+```
+
+Keep identity and object counts explicit. `--seed` default in h3.c is 42; UI should still offer random. There is **no** on-device prompt rewriter in v1 (same as ltx-ws `enhancement_enabled=false`).
+
+---
+
+## File plan (target)
+
+```
+server.py              WS + embedded UI
+web_ui.py              HTTP API, library, jobs
+h3_backend.py          h3.c process manager
+h3_media.py            frame extract, concat, snap helpers
+h3_paths.py            model / output / binary paths
+h3cli.py               WS CLI client
+mcp_server.py          MCP adapter
+web/                   React UI (ltx-ws visual language)
+third_party/h3.c       submodule
+scripts/build_h3.sh
+scripts/download_model.py
+models/                gitignored MiniMax-H3 snapshot
+web_outputs/
+```
+
+Copy UI chrome from `../ltx-ws/web` (layout, library, progress, clip multiplier). Replace the generate-form controls and `types.ts` config shape.
+
+---
+
+## Decisions already made
+
+1. **Engine = h3.c**, not MiniMax PyTorch/SGLang/vLLM, not minimax-h3-mlx (v1).
+2. **UI/UX clone** of ltx-ws; **options are H3-native**.
+3. **One generation at a time**, fair queue.
+4. **FL2VA warm, Ref2VA on demand.**
+5. **Apple Silicon only** (Metal). No CUDA story.
+6. **FFmpeg is required** (h3.c pipes RGB24 + PCM; we do not replace that muxer).
+
+## Open questions (resolve during P2–P5, not before)
+
+- Exact stdin protocol robustness of interactive `h3` (parse `!help` once we have a local binary).
+- Whether to pin a h3.c git SHA in the submodule (yes, once the first green generate lands).
+- Branding in the header: **H3-WS** (drop “Videofentanyl” unless we decide to keep the in-joke).
+- Default duration: 22-frame dev vs 107-frame (~4.5 s) “real clip”. Lean **22 for first boot**, **107 as the UI default after P3**.
