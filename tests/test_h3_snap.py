@@ -160,5 +160,70 @@ class QualityTests(unittest.TestCase):
         self.assertNotIn("--token-reduction", argv)
 
 
+class AudioDurationTests(unittest.TestCase):
+    def test_audio_too_short(self) -> None:
+        from h3_media import assert_audio_durations
+
+        with self.assertRaisesRegex(ValueError, "at least 2"):
+            assert_audio_durations([1.2])
+
+    def test_audio_too_long(self) -> None:
+        from h3_media import assert_audio_durations
+
+        with self.assertRaisesRegex(ValueError, "at most 15"):
+            assert_audio_durations([16.0])
+
+    def test_audio_total_cap(self) -> None:
+        from h3_media import assert_audio_durations
+
+        with self.assertRaisesRegex(ValueError, "caps the sum"):
+            assert_audio_durations([8.0, 8.0])
+
+    def test_audio_ok(self) -> None:
+        from h3_media import assert_audio_durations
+
+        assert_audio_durations([2.0, 5.0, 7.0])
+
+
+class SessionCommandTests(unittest.TestCase):
+    def test_session_commands_clear_refs_before_anchors(self) -> None:
+        from h3_session import session_commands_for_request
+
+        req = GenerateRequest(
+            prompt="fox",
+            output_path=Path("/tmp/out.mp4"),
+            first_frame=Path("a.png"),
+            quality="balanced",
+            seed=7,
+        )
+        cmds = session_commands_for_request(req)
+        self.assertLess(cmds.index("!refs clear"), cmds.index("!first a.png"))
+        self.assertIn("!last clear", cmds)
+        self.assertIn("!seed 7", cmds)
+        self.assertIn("!reuse 2", cmds)
+        self.assertIn("!core-reuse 1", cmds)
+
+    def test_session_argv_has_no_prompt(self) -> None:
+        from h3_session import build_session_argv
+
+        req = GenerateRequest(prompt="fox", output_path=Path("/tmp/out.mp4"))
+        argv = build_session_argv(h3_bin=Path("/opt/h3"), model_dir=Path("/m"), req=req)
+        self.assertNotIn("-p", argv)
+        self.assertNotIn("fox", argv)
+        self.assertIn("--profile", argv)
+
+    def test_parse_done_and_progress(self) -> None:
+        from h3_session import parse_cli_progress, parse_done_path, parse_outputs_dir
+
+        text = "Outputs: /tmp/h3-abc123\nDone -> /tmp/h3-abc123/video-0001.mp4 [12.50s]\nh3> "
+        self.assertEqual(parse_outputs_dir(text), Path("/tmp/h3-abc123"))
+        self.assertEqual(parse_done_path(text), Path("/tmp/h3-abc123/video-0001.mp4"))
+        progress = parse_cli_progress("\rdenoise                  4/20")
+        self.assertIsNotNone(progress)
+        assert progress is not None
+        self.assertEqual(progress["step"], 4)
+        self.assertEqual(progress["total"], 20)
+
+
 if __name__ == "__main__":
     unittest.main()

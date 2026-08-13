@@ -57,3 +57,23 @@ def default_model_dir() -> Path:
     if env:
         return Path(env).expanduser().resolve()
     return REPO_ROOT / "models" / "MiniMax-H3"
+
+
+def default_h3_av() -> Path:
+    env = os.environ.get("H3_AV", "").strip()
+    if env:
+        return Path(env).expanduser()
+    return REPO_ROOT / "scripts" / "h3-av"
+
+
+def h3_media_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Force h3.c to posix_spawn the PyAV shim instead of system ffmpeg."""
+    import sys
+
+    env = dict(base if base is not None else os.environ)
+    shim = str(default_h3_av())
+    env["H3_AV"] = shim
+    env["H3_FFMPEG"] = shim
+    env["H3_FFPROBE"] = shim
+    env["H3_PYTHON"] = sys.executable
+    return env

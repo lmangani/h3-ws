@@ -1,11 +1,10 @@
-"""One-shot h3.c process manager (P2). Resident interactive session is P5."""
+"""One-shot h3.c process manager plus a warm FL2VA interactive session."""
 
 from __future__ import annotations
 
 import logging
 import os
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -15,8 +14,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from h3_media import require_ui_canvas, snap_frames
-from h3_paths import default_h3_bin, default_model_dir, mk_scratch_file
+from h3_media import (
+    assert_audio_durations,
+    ffmpeg_ok,
+    probe_duration_seconds,
+    require_ui_canvas,
+    snap_frames,
+)
+from h3_paths import default_h3_bin, default_model_dir, h3_media_env, mk_scratch_file
 
 log = logging.getLogger("h3-backend")
 
@@ -267,6 +272,7 @@ def validate_refs(refs: list[RefItem]) -> None:
         raise ValueError(f"at most {MAX_REF_FILES} mixed reference files")
     if n_aud and not has_visual:
         raise ValueError("standalone audio must accompany an image or video reference")
+    _validate_ref_audio_durations(refs)
 
 
 def parse_refs_payload(raw: Any) -> list[RefItem]:
@@ -293,6 +299,28 @@ def parse_refs_payload(raw: Any) -> list[RefItem]:
         )
     validate_refs(items)
     return items
+
+
+def _audio_paths_for_ref(item: RefItem) -> list[Path]:
+    if item.kind == "audio":
+        return [item.path]
+    if item.kind == "video_audio" and item.audio_path is not None:
+        return [item.audio_path]
+    if item.kind == "video":
+        return [item.path]
+    return []
+
+
+def _validate_ref_audio_durations(refs: list[RefItem]) -> None:
+    seconds: list[float] = []
+    for item in refs:
+        for path in _audio_paths_for_ref(item):
+            duration = probe_duration_seconds(path)
+            if duration is None:
+                continue
+            seconds.append(duration)
+    if seconds:
+        assert_audio_durations(seconds)
 
 
 def append_ref_flags(cmd: list[str], refs: list[RefItem]) -> None:
@@ -431,6 +459,7 @@ class H3Engine:
         self._cancel = threading.Event()
         self._progress: dict[str, Any] = {}
         self._t0 = 0.0
+        self._session: Any | None = None
 
     def model_progress_for_ws(self) -> dict[str, Any] | None:
         p = dict(self._progress)
@@ -441,9 +470,23 @@ class H3Engine:
         proc = self._proc
         if proc is not None and proc.poll() is None:
             proc.terminate()
+        session = self._session
+        if session is not None:
+            try:
+                session.stop()
+            except Exception:
+                pass
+            self._session = None
 
     def shutdown(self, wait: bool = True) -> None:
         self.request_cancel()
+        session = self._session
+        self._session = None
+        if session is not None:
+            try:
+                session.stop()
+            except Exception:
+                pass
         proc = self._proc
         if proc is None:
             return
@@ -469,10 +512,19 @@ class H3Engine:
                 capture_output=True,
                 text=True,
                 timeout=60,
+                env=h3_media_env(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return {"ok": False, "error": str(exc), "h3_bin": str(self.h3_bin)}
         text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        media_ok, media_note = ffmpeg_ok()
+        if proc.returncode == 0 and not media_ok:
+            return {
+                "ok": False,
+                "error": media_note,
+                "h3_bin": str(self.h3_bin),
+                "model_dir": str(self.model_dir),
+            }
         return {
             "ok": proc.returncode == 0,
             "returncode": proc.returncode,
@@ -481,6 +533,7 @@ class H3Engine:
             "model_dir": str(self.model_dir),
             "ram_gb": ram_gb(),
             "recommend_ssd_streaming": self.default_ssd_streaming,
+            "warm_session": bool(self._session and getattr(self._session, "alive", False)),
         }
 
     def _parse_line(self, line: str, steps: int) -> None:
@@ -518,17 +571,102 @@ class H3Engine:
         ok, note = model_layout_ok(self.model_dir, need_ref2va=need_ref)
         if not ok:
             raise FileNotFoundError(note)
-        ffmpeg = shutil.which(os.environ.get("H3_FFMPEG", "ffmpeg")) or shutil.which(
-            "ffmpeg"
-        )
-        if not ffmpeg:
-            raise FileNotFoundError(
-                "FFmpeg not found on PATH (h3.c needs ffmpeg + ffprobe)"
-            )
+        media_ok, media_note = ffmpeg_ok()
+        if not media_ok:
+            raise FileNotFoundError(media_note)
 
         req.output_path = Path(req.output_path)
         req.output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        if need_ref:
+            self._stop_session()
+            return self._generate_oneshot(req, on_progress=on_progress)
+
+        from h3_session import SessionError
+
+        try:
+            return self._generate_session(req, on_progress=on_progress)
+        except GenerationCancelledError:
+            self._stop_session()
+            raise
+        except SessionError as exc:
+            log.warning("warm session unavailable (%s) — one-shot fallback", exc)
+            self._stop_session()
+            return self._generate_oneshot(req, on_progress=on_progress)
+
+    def _stop_session(self) -> None:
+        session = self._session
+        self._session = None
+        if session is None:
+            return
+        try:
+            session.stop()
+        except Exception as exc:
+            log.debug("session stop: %s", exc)
+
+    def _generate_session(
+        self,
+        req: GenerateRequest,
+        *,
+        on_progress: ProgressCallback | None,
+    ) -> str:
+        from h3_session import (
+            H3InteractiveSession,
+            build_session_argv,
+            copy_session_output,
+        )
+
+        q = expand_quality(
+            req.quality,
+            steps=req.steps,
+            layers=req.layers,
+            reuse=req.reuse,
+            core_reuse=req.core_reuse,
+            token_reduction=req.token_reduction,
+            width=req.width,
+            height=req.height,
+            render_width=req.render_width,
+            render_height=req.render_height,
+        )
+        self._cancel.clear()
+        self._t0 = time.time()
+        self._progress = {"stage": "starting", "elapsed_s": 0, "total": q["steps"]}
+        if on_progress:
+            on_progress(self._progress)
+
+        def _on_progress(mp: dict[str, Any]) -> None:
+            mp = dict(mp)
+            mp["elapsed_s"] = round(time.time() - self._t0, 1)
+            self._progress = mp
+            if on_progress:
+                on_progress(mp)
+
+        session = self._session
+        if session is None or not getattr(session, "alive", False):
+            self._stop_session()
+            argv = build_session_argv(
+                h3_bin=self.h3_bin, model_dir=self.model_dir, req=req
+            )
+            log.info("h3 session argv: %s", " ".join(argv[:8]) + " …")
+            env = h3_media_env()
+            if req.profile:
+                env["H3_PROFILE"] = "1"
+            session = H3InteractiveSession(cancel=self._cancel)
+            session.start(argv, env=env)
+            self._session = session
+        session.apply_request(req)
+        produced = session.generate(req.prompt, on_progress=_on_progress)
+        copy_session_output(produced, req.output_path)
+        if not req.output_path.is_file() or req.output_path.stat().st_size < 32:
+            raise RuntimeError(f"h3 did not write an MP4 at {req.output_path}")
+        return str(req.output_path)
+
+    def _generate_oneshot(
+        self,
+        req: GenerateRequest,
+        *,
+        on_progress: ProgressCallback | None,
+    ) -> str:
         q = expand_quality(
             req.quality,
             steps=req.steps,
@@ -550,7 +688,7 @@ class H3Engine:
         if on_progress:
             on_progress(self._progress)
 
-        env = os.environ.copy()
+        env = h3_media_env()
         try:
             with self._lock:
                 proc = subprocess.Popen(

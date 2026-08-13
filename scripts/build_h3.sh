@@ -13,6 +13,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 jobs="$(sysctl -n hw.ncpu 2>/dev/null || echo 8)"
+PATCH="$ROOT/patches/h3-prefer-H3_AV.patch"
+if [[ -f "$PATCH" ]] && ! grep -q 'getenv("H3_AV")' "$SRC/h3_ffmpeg.c"; then
+  echo "Applying H3_AV media-shim patch…"
+  patch -p1 -d "$SRC" < "$PATCH"
+fi
 echo "Building h3.c with make -j${jobs} …"
 make -C "$SRC" -j"$jobs"
 if [[ -x "$SRC/h3" ]]; then

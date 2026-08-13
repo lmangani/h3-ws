@@ -1,4 +1,9 @@
-"""H3 canvas / duration snap helpers and light media I/O (PyAV)."""
+"""H3 canvas / duration snap helpers and PyAV media I/O.
+
+All Python-side media (concat, last-frame, duration, and the h3.c ffmpeg CLI
+shim in ``h3_av.py``) goes through PyAV. h3.c posix_spawns ``scripts/h3-av``
+via ``H3_AV`` instead of a system ffmpeg install.
+"""
 
 from __future__ import annotations
 
@@ -174,6 +179,79 @@ def media_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+MIN_REF_AUDIO_S = 2.0
+MAX_REF_AUDIO_S = 15.0
+MAX_REF_AUDIO_TOTAL_S = 15.0
+MAX_REF_AUDIO_CLIPS = 3
+_DURATION_SLACK_S = 0.05
+
+
+def media_shim_ok() -> tuple[bool, str]:
+    """PyAV + h3-av shim (the tools h3.c will posix_spawn)."""
+    from h3_paths import default_h3_av
+
+    if not media_available():
+        return False, "PyAV is required (pip install av) — h3.c media goes through h3-av"
+    shim = default_h3_av()
+    if not shim.is_file():
+        return False, f"h3-av shim not found at {shim}"
+    return True, str(shim)
+
+
+def ffmpeg_ok() -> tuple[bool, str]:
+    """Backward-compatible alias: the media stack is the PyAV shim."""
+    return media_shim_ok()
+
+
+def probe_duration_seconds(path: Path | str) -> float | None:
+    """Duration in seconds via PyAV. No ffprobe CLI."""
+    src = Path(path)
+    if not src.is_file() or not media_available():
+        return None
+    try:
+        import av
+
+        container = av.open(str(src))
+        try:
+            if container.duration and container.duration > 0:
+                return float(container.duration) / float(av.time_base)
+            best = 0.0
+            for stream in container.streams:
+                if stream.duration and stream.time_base and stream.duration > 0:
+                    seconds = float(stream.duration * stream.time_base)
+                    if seconds > best:
+                        best = seconds
+            return best or None
+        finally:
+            container.close()
+    except Exception:
+        return None
+
+
+def assert_audio_durations(seconds: list[float]) -> None:
+    """Enforce h3.c audio-reference limits (2–15 s each, ≤3 clips, total ≤15 s)."""
+    if len(seconds) > MAX_REF_AUDIO_CLIPS:
+        raise ValueError(f"at most {MAX_REF_AUDIO_CLIPS} audio references")
+    total = 0.0
+    for duration in seconds:
+        if duration + _DURATION_SLACK_S < MIN_REF_AUDIO_S:
+            raise ValueError(
+                f"audio reference is {duration:.2f}s; h3.c requires at least "
+                f"{MIN_REF_AUDIO_S:.0f}s"
+            )
+        if duration - _DURATION_SLACK_S > MAX_REF_AUDIO_S:
+            raise ValueError(
+                f"audio reference is {duration:.2f}s; h3.c allows at most "
+                f"{MAX_REF_AUDIO_S:.0f}s"
+            )
+        total += duration
+    if total - _DURATION_SLACK_S > MAX_REF_AUDIO_TOTAL_S:
+        raise ValueError(
+            f"audio references total {total:.2f}s; h3.c caps the sum at "
+            f"{MAX_REF_AUDIO_TOTAL_S:.0f}s"
+        )
 
 
 def extract_last_frame(video_path: str | Path, dest: str | Path) -> Path:

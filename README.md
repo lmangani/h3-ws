@@ -1,30 +1,16 @@
 # h3-ws
 
-Local **MiniMax-H3** video+audio generation on Apple Silicon — Web UI, CLI, and MCP over a single WebSocket server.
+Local **MiniMax-H3** video+audio generation on Apple Silicon. Native [h3.c](https://github.com/antirez/h3.c) (Metal) with a browser UI.
 
-The inference engine is native **[h3.c](https://github.com/antirez/h3.c)** (Metal). The product shell follows [ltx-ws](https://github.com/audiohacking/ltx-ws): same generate / library / progress UX, new model options from the H3 CLI.
-
-| Service | URL |
-|---------|-----|
-| Web UI | http://127.0.0.1:8765/ |
-| WebSocket | ws://127.0.0.1:8765/ws |
-
-See [ROADMAP.md](ROADMAP.md) for architecture and remaining phases. Agent notes: [AGENTS.md](AGENTS.md).
-
-## Status
-
-**P0–P4 plus Ref2VA UI are in tree:** scaffold, one-shot `h3` backend, WebSocket + library UI with H3 quality presets, FL2VA first/last-frame modes, autocontinue clip chains, ordered Ref2VA references, and documented canvas dropdowns. A generate still needs a built `h3` binary and MiniMax-H3 weights.
-
-Not in this slice: resident interactive session (P5), CLI/MCP (P7).
+Open **http://127.0.0.1:8765/** after starting the server.
 
 ## Requirements
 
 - Apple Silicon Mac (Metal)
-- Python 3.11+
-- Node.js 18+ (to build `web/dist/`)
-- Xcode command-line tools (`make` for h3.c)
-- FFmpeg + FFprobe on `PATH`
-- Disk / RAM — full residency is ~40 GB peak; use `--ssd-streaming` under ~64 GB
+- Python 3.11+ with packages from `requirements.txt` (PyAV `av` for all media, including the h3.c mux/decode shim)
+- Node.js 18+ (to build the UI)
+- Xcode command-line tools (`make`)
+- Enough unified memory for the model (~40 GB peak). Use `--ssd-streaming` if you have under ~64 GB.
 
 ## Install
 
@@ -44,41 +30,37 @@ python scripts/download_model.py
 cd web && npm install && npm run build && cd ..
 ```
 
-## Quick start
+Weights come from [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) (`FL2VA/` and `Ref2VA/`) and land in `models/MiniMax-H3`.
+
+## Run
 
 ```bash
 source .venv/bin/activate
 python server.py
 ```
 
-Open http://127.0.0.1:8765/ — default job is 512×512, 22 frames, **balanced** quality.
+Or double-click `Start H3-WS.command`.
+
+Default generate is 512×512, ~0.9 s (22 frames), **balanced** quality. Lower RAM:
 
 ```bash
-python server.py --width 512 --height 512 --num-frames 22 --quality balanced --ssd-streaming
+python server.py --ssd-streaming
 ```
 
-## Engine
+## Generate
 
-- Weights: [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) (`FL2VA/` + `Ref2VA/`)
-- Output: 24 fps video + 32 kHz stereo audio
-- Frame counts snap **up** to `5 + 17n`
-- Canvas: documented sizes only in the UI (256×256 preview … 768×1344); width/height multiples of 32, max 768×1344
-- Quality presets: `four_step` · `aggressive` · `fast` · `balanced` · `close`
-- Ref2VA: ordered image / video / audio references (`Picture N`, `Video N`); cannot mix with first/last-frame
+Prompts should describe scene, action, camera, look, and audio. What you type is what H3 sees — there is no cloud rewriter.
 
-Do not mix first/last-frame anchors with Ref2VA references.
+| Mode | Use |
+|------|-----|
+| Text to video+audio | Prompt only |
+| First / last / first+last frame | Image anchors |
+| Ordered references (Ref2VA) | Image, silent video, video, video+audio, and/or audio |
 
-## Layout
+First/last-frame anchors cannot be mixed with Ref2VA references. For references, prompt with `Picture 1`, `Video 1`, `Audio 1` in list order. Standalone audio must accompany an image or video (≤9 images, ≤3 videos, ≤3 audio).
 
-```
-server.py              WS + embedded UI
-web_ui.py              HTTP API, library, jobs
-h3_backend.py          one-shot h3.c process manager
-h3_media.py            frame snap, last-frame extract, concat
-web/                   React UI
-third_party/h3.c       submodule
-scripts/build_h3.sh
-scripts/download_model.py
-models/                gitignored MiniMax-H3 snapshot
-web_outputs/
-```
+**Quality:** Four-step · Aggressive · Fast · Balanced (default) · Close.
+
+**Canvas** (dropdown only): 256×256 preview, 512×512 (safest), 512×512 with 384 or 320 internal, 768×768, 1024×768, 768×1024, 1344×768, 768×1344. H3-Base is a 768p model; 512×512 is the usual working size.
+
+Output is 24 fps video with 32 kHz stereo audio. Duration snaps up to a legal H3 length (about 0.9 s, 1.6 s, 2.3 s, 4.5 s, 10 s, 15 s).

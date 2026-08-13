@@ -17,7 +17,6 @@ import contextlib
 import json
 import logging
 import os
-import shutil
 import sys
 import time
 import uuid
@@ -468,8 +467,6 @@ def main() -> None:
     if args.web_ui:
         print(f"  Web UI   : {http_url}")
         ensure_web_dist_built(auto_build=True)
-    if not shutil.which("ffmpeg"):
-        print("  [warn] ffmpeg not on PATH — h3.c needs ffmpeg + ffprobe")
     print(f"{'═' * 60}\n", flush=True)
 
     info = engine.info()

@@ -149,7 +149,7 @@ Released workflow is **~4–15 s**. Short clips are for iteration.
 
 ## Implementation phases
 
-**P0–P4 in tree (this checkout).** P5+ still ahead.
+**P0–P6 UI + P5 warm FL2VA in tree (this checkout).** P7 CLI/MCP still ahead.
 
 ### P0 — Scaffold
 
@@ -173,20 +173,16 @@ Done: first/last/fl2va uploads, library-frame capture, clip ×N last-frame chain
 
 ### P5 — Resident `h3` session
 
-- Keep one interactive `./h3 -d …` process; drive via stdin (`prompt`, `!seed`, `!first`, `!seconds`, `!save`)
-- Parse session directory / output paths; stream the saved MP4 over WS
-- Recycle the process on crash; never share one stdin across overlapping jobs
-- Progress: parse `--profile` / step logs into existing SSE `model_progress` (`step` / `total` / `eta_s`)
-- Warm FL2VA is the default path; one-shot remains the fallback
+**In tree:** FL2VA jobs reuse an interactive `./h3` process (PTY, linenoise). Settings are applied with `!size` / `!frames` / `!first` / …; the MP4 is copied out of the session directory. Ref2VA still one-shots (interactive CLI only has `!ref-image`, and mixing checkpoints in one process is unsafe). Session crash or start failure falls back to one-shot. Cancel tears the process down.
 
 ### P6 — Ref2VA
 
-**UI (one-shot) is in tree:** ordered ref list under the prompt (image / silent video / video / video+audio / audio), Picture N / Video N tokens, mutual exclusion with first/last-frame, documented canvas dropdown.
+**UI (one-shot) is in tree:** ordered ref list under the prompt (image / silent video / video / video+audio / audio), Picture N / Video N tokens, mutual exclusion with first/last-frame, documented canvas dropdown, audio duration checks (2–15 s each, total ≤15 s) at ingest.
 
 Still remaining for the warm session:
 
-- Switching FL2VA ↔ Ref2VA: tear down or swap the resident process (do not mix `!first` with `!ref-image`)
-- Audio duration checks (2–15 s each, total ≤15 s) at ingest time
+- Interactive `!ref-video` / `!ref-audio` (upstream CLI only has `!ref-image` today)
+- Switching FL2VA ↔ Ref2VA without dropping the FL2VA process (today Ref2VA stops the warm session so two transformers are not resident at once)
 
 ### P7 — CLI + MCP + agent docs
 
@@ -249,7 +245,7 @@ Copy UI chrome from `../ltx-ws/web` (layout, library, progress, clip multiplier)
 3. **One generation at a time**, fair queue.
 4. **FL2VA warm, Ref2VA on demand.**
 5. **Apple Silicon only** (Metal). No CUDA story.
-6. **FFmpeg is required** (h3.c pipes RGB24 + PCM; we do not replace that muxer).
+6. **h3.c media is a PyAV shim.** `H3_AV`/`H3_FFMPEG`/`H3_FFPROBE` point at `scripts/h3-av` (`h3_av.py`). No system ffmpeg install. Patch: `patches/h3-prefer-H3_AV.patch`.
 
 ## Open questions (resolve during P2–P5, not before)
 

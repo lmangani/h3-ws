@@ -9,14 +9,14 @@ Canonical guide for AI agents using **h3-ws** to generate video on Apple Silicon
 | Piece | Role |
 |-------|------|
 | `server.py` | Local MiniMax-H3 inference via native **h3.c**. One job at a time. Embeds Web UI. |
-| `h3_backend.py` | Spawns `./h3 -p … -o`. Resident interactive session is P5. |
+| `h3_backend.py` | Spawns `./h3 -p … -o`. FL2VA keeps a resident interactive session; Ref2VA is one-shot. |
 | `web_ui.py` + `web/` | Browser library, quality presets, SSE progress. |
 | Weights | `models/MiniMax-H3/{FL2VA,Ref2VA}` from `MiniMaxAI/MiniMax-H3` |
 
 **Default Web UI:** http://127.0.0.1:8765/  
 **WebSocket:** ws://127.0.0.1:8765/ws  
 
-This stack does **not** run cloud prompt expansion. What you send is what H3 sees.
+This stack does **not** run cloud prompt expansion. What you send is what H3 sees. h3.c media I/O is the PyAV shim (`scripts/h3-av`); no system ffmpeg.
 
 ## Weights (mandatory)
 
