@@ -28,6 +28,9 @@ from starlette.requests import Request  # noqa: E402
 
 from h3_backend import (
     GENERATION_MODES,
+    H3_DEFAULT_LAYERS,
+    H3_DEFAULT_REUSE,
+    H3_DEFAULT_STEPS,
     QUALITY_PRESET_LIST,
     GenerateRequest,
     GenerationCancelledError,
@@ -91,6 +94,8 @@ class ClipRecord:
     height: Optional[int] = None
     seed: Optional[int] = None
     num_steps: Optional[int] = None
+    layers: Optional[int] = None
+    reuse: Optional[int] = None
     duration_seconds: Optional[float] = None
     clip_count: Optional[int] = None
     autocontinue: Optional[bool] = None
@@ -527,7 +532,9 @@ def _clip_settings_from_body(body: dict[str, Any]) -> dict[str, Any]:
         "width": width,
         "height": height,
         "seed": seed_i,
-        "num_steps": int(body.get("num_steps") or body.get("steps") or 20),
+        "num_steps": int(body.get("num_steps") or body.get("steps") or H3_DEFAULT_STEPS),
+        "layers": int(body["layers"]) if body.get("layers") is not None else H3_DEFAULT_LAYERS,
+        "reuse": int(body["reuse"]) if body.get("reuse") is not None else H3_DEFAULT_REUSE,
         "duration_seconds": float(body.get("duration_seconds") or num_frames / FPS),
         "clip_count": int(body.get("clip_count") or 1),
         "autocontinue": bool(body.get("autocontinue")),
@@ -604,9 +611,9 @@ def _request_from_body(
         height=int(settings["height"] or 512),
         num_frames=int(settings["num_frames"] or 22),
         quality=str(settings.get("quality") or "fast"),
-        steps=int(settings["num_steps"] or 20),
-        layers=int(body["layers"]) if body.get("layers") is not None else None,
-        reuse=int(body["reuse"]) if body.get("reuse") is not None else None,
+        steps=int(settings["num_steps"] or H3_DEFAULT_STEPS),
+        layers=int(settings["layers"]) if settings.get("layers") is not None else None,
+        reuse=int(settings["reuse"]) if settings.get("reuse") is not None else None,
         core_reuse=int(body["core_reuse"]) if body.get("core_reuse") is not None else None,
         token_reduction=bool(body["token_reduction"])
         if body.get("token_reduction") is not None
@@ -881,7 +888,9 @@ def create_app(
             "num_frames": 22,
             "width": 512,
             "height": 512,
-            "num_steps": 20,
+            "num_steps": H3_DEFAULT_STEPS,
+            "layers": H3_DEFAULT_LAYERS,
+            "reuse": H3_DEFAULT_REUSE,
             "fps": FPS,
             "quality": "fast",
         }
@@ -1107,7 +1116,7 @@ def create_app(
         started = await state.enqueue_generation_run(run_id)
         state.save_index()
         log.info(
-            "Web UI: %s run %s  clips=%d  mode=%s  %sx%s  frames=%s  quality=%s",
+            "Web UI: %s run %s  clips=%d  mode=%s  %sx%s  frames=%s  quality=%s  steps=%s  layers=%s  reuse=%s",
             "starting" if started else "queued",
             run_id,
             len(clip_ids),
@@ -1116,6 +1125,9 @@ def create_app(
             settings.get("height"),
             settings.get("num_frames"),
             settings.get("quality"),
+            settings.get("num_steps"),
+            settings.get("layers"),
+            settings.get("reuse"),
         )
         return {
             "run_id": run_id,

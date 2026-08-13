@@ -774,9 +774,12 @@ body {
   grid-template-columns:
     minmax(108px, 1.25fr)
     minmax(96px, 1.1fr)
-    68px
+    minmax(88px, 1.2fr)
     56px
-    56px
+    52px
+    52px
+    52px
+    52px
     minmax(72px, 0.85fr);
   gap: 8px;
   align-items: end;

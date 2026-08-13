@@ -110,6 +110,24 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(q["steps"], 4)
         self.assertEqual(q["reuse"], 1)
 
+    def test_close_keeps_fifty_full_blocks(self) -> None:
+        q = expand_quality("close")
+        self.assertEqual(q["steps"], 50)
+        self.assertEqual(q["layers"], 50)
+        self.assertEqual(q["reuse"], 1)
+
+    def test_balanced_is_h3_cli_defaults(self) -> None:
+        q = expand_quality("balanced")
+        self.assertEqual(q["steps"], 20)
+        self.assertEqual(q["layers"], 50)
+        self.assertEqual(q["reuse"], 1)
+
+    def test_layers_and_reuse_overrides(self) -> None:
+        q = expand_quality("fast", steps=20, layers=50, reuse=1)
+        self.assertEqual(q["steps"], 20)
+        self.assertEqual(q["layers"], 50)
+        self.assertEqual(q["reuse"], 1)
+
     def test_build_argv_t2va(self) -> None:
         req = GenerateRequest(
             prompt="a red fox",
@@ -126,8 +144,9 @@ class QualityTests(unittest.TestCase):
         self.assertIn("a red fox", argv)
         self.assertIn("--frames", argv)
         self.assertIn("22", argv)
-        self.assertIn("--reuse", argv)
-        self.assertIn("2", argv)
+        self.assertEqual(argv[argv.index("--steps") + 1], "20")
+        self.assertEqual(argv[argv.index("--layers") + 1], "50")
+        self.assertEqual(argv[argv.index("--reuse") + 1], "1")
         self.assertIn("--seed", argv)
         self.assertIn("42", argv)
         self.assertIn("--profile", argv)
@@ -287,7 +306,7 @@ class SessionCommandTests(unittest.TestCase):
         self.assertLess(cmds.index("!refs clear"), cmds.index("!first a.png"))
         self.assertIn("!last clear", cmds)
         self.assertIn("!seed 7", cmds)
-        self.assertIn("!reuse 2", cmds)
+        self.assertIn("!reuse 1", cmds)
         self.assertIn("!core-reuse 1", cmds)
 
     def test_session_argv_has_no_prompt(self) -> None:

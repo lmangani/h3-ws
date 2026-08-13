@@ -34,6 +34,8 @@ export interface ClipEditorSnapshot {
   durationId: string;
   clipMultiplier: number;
   numSteps: number;
+  layers: number;
+  reuse: number;
   seed: string;
   quality: string;
 }
@@ -41,7 +43,7 @@ export interface ClipEditorSnapshot {
 export function snapshotFromClip(
   clip: Clip,
   config: Config | null,
-  defaults: { numSteps: number; quality: string },
+  defaults: { numSteps: number; layers: number; reuse: number; quality: string },
 ): ClipEditorSnapshot {
   return {
     prompt: clipDisplayPrompt(clip.prompt),
@@ -50,6 +52,8 @@ export function snapshotFromClip(
     durationId: durationIdForClip(clip, config),
     clipMultiplier: clip.clip_count ?? 1,
     numSteps: clip.num_steps ?? defaults.numSteps,
+    layers: clip.layers ?? defaults.layers,
+    reuse: clip.reuse ?? defaults.reuse,
     seed: clip.seed != null ? String(clip.seed) : "",
     quality: clip.quality ?? defaults.quality,
   };

@@ -32,6 +32,9 @@ ensure_python_requirements()
 import websockets  # noqa: E402
 
 from h3_backend import (  # noqa: E402
+    H3_DEFAULT_LAYERS,
+    H3_DEFAULT_REUSE,
+    H3_DEFAULT_STEPS,
     QUALITY_PRESETS,
     GenerateRequest,
     GenerationCancelledError,
@@ -197,7 +200,17 @@ class RequestHandler:
                 await self._send_json(type="error", error_code="invalid_canvas", message=str(exc))
                 return
             frames = snap_frames(self._msg_int(msg, "num_frames", int(self.defaults["num_frames"])))
-            steps = self._msg_int(msg, "num_steps", int(self.defaults.get("num_steps") or 20))
+            steps = self._msg_int(
+                msg, "num_steps", int(self.defaults.get("num_steps") or H3_DEFAULT_STEPS)
+            )
+            layers = (
+                self._msg_int(msg, "layers", H3_DEFAULT_LAYERS)
+                if "layers" in msg
+                else None
+            )
+            reuse = (
+                self._msg_int(msg, "reuse", H3_DEFAULT_REUSE) if "reuse" in msg else None
+            )
             seed = self._msg_int(msg, "seed", -1)
             quality = str(msg.get("quality") or self.defaults.get("quality") or "fast")
             if "ssd_streaming" in msg:
@@ -247,6 +260,8 @@ class RequestHandler:
                 num_frames=frames,
                 quality=quality,
                 steps=steps,
+                layers=layers,
+                reuse=reuse,
                 seed=None if seed < 0 else seed,
                 ssd_streaming=ssd,
                 first_frame=first,
@@ -421,7 +436,9 @@ def main() -> None:
         "width": width,
         "height": height,
         "num_frames": frames,
-        "num_steps": 20,
+        "num_steps": H3_DEFAULT_STEPS,
+        "layers": H3_DEFAULT_LAYERS,
+        "reuse": H3_DEFAULT_REUSE,
         "fps": 24,
         "quality": args.quality,
         "ssd_streaming": bool(ssd),

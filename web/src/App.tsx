@@ -3,7 +3,7 @@ import { clipDisplayPrompt, snapshotFromClip } from "./clipEditor";
 import { applyProgressEvent } from "./progress";
 import { captureVideoFrame, formatVideoTime } from "./frameCapture";
 import { RefList, refsAreValid } from "./RefList";
-import type { Clip, Config, LibraryFrame, PresetOption, ProgressState, ReferenceItem } from "./types";
+import type { Clip, Config, LibraryFrame, PresetOption, ProgressState, QualityPreset, ReferenceItem } from "./types";
 
 function resolutionGroups(presets: PresetOption[]): { group: string; items: PresetOption[] }[] {
   const order: { group: string; items: PresetOption[] }[] = [];
@@ -19,6 +19,20 @@ function resolutionGroups(presets: PresetOption[]): { group: string; items: Pres
     order[slot].items.push(preset);
   }
   return order;
+}
+
+const H3_DEFAULT_STEPS = 20;
+const H3_DEFAULT_LAYERS = 50;
+const H3_DEFAULT_REUSE = 1;
+
+function fieldsFromPreset(preset: QualityPreset | undefined) {
+  const steps = preset?.steps ?? H3_DEFAULT_STEPS;
+  return {
+    steps,
+    layers: preset?.layers ?? H3_DEFAULT_LAYERS,
+    reuse: steps <= 7 ? 1 : (preset?.reuse ?? H3_DEFAULT_REUSE),
+    tokenReduction: Boolean(preset?.token_reduction),
+  };
 }
 
 const API = "";
@@ -188,7 +202,9 @@ export default function App() {
   const [resolutionId, setResolutionId] = useState("512x512");
   const [durationId, setDurationId] = useState("1s");
   const [clipMultiplier, setClipMultiplier] = useState(1);
-  const [numSteps, setNumSteps] = useState(20);
+  const [numSteps, setNumSteps] = useState(H3_DEFAULT_STEPS);
+  const [layers, setLayers] = useState(H3_DEFAULT_LAYERS);
+  const [reuse, setReuse] = useState(H3_DEFAULT_REUSE);
   const [seed, setSeed] = useState("");
   const [ssdStreaming, setSsdStreaming] = useState(false);
   const [tokenReduction, setTokenReduction] = useState(true);
@@ -244,7 +260,9 @@ export default function App() {
   const lastUsesPrimaryUpload = mode === "last_frame" && !isRef2va;
   const previewCanvas = resolutionId === "256x256";
   const aggressiveInternal = resolutionId === "512x512-aggressive";
-  const tokenReductionLocked = previewCanvas || aggressiveInternal || quality === "aggressive";
+  const tokenReductionLocked =
+    previewCanvas || aggressiveInternal || quality === "aggressive" || (layers === 40 && reuse === 3);
+  const closePreset = config?.quality_presets.find((p) => p.id === "close");
 
   useEffect(() => {
     void maybeRequestNotifyPermissionOnHttps();
@@ -252,8 +270,12 @@ export default function App() {
       .then((cfg) => {
         setConfig(cfg);
         setQuality(cfg.defaults.quality ?? "fast");
-        setNumSteps(cfg.defaults.num_steps);
-        setTokenReduction((cfg.defaults.quality ?? "fast") === "fast");
+        const preset = cfg.quality_presets.find((p) => p.id === (cfg.defaults.quality ?? "fast"));
+        const fields = fieldsFromPreset(preset);
+        setNumSteps(fields.steps);
+        setLayers(fields.layers);
+        setReuse(fields.reuse);
+        setTokenReduction(fields.tokenReduction);
         setSsdStreaming(false);
         const defRes =
           cfg.resolution_presets.find((r) => r.id === "512x512") ??
@@ -283,6 +305,8 @@ export default function App() {
       if (!config) return;
       const snap = snapshotFromClip(clip, config, {
         numSteps: config.defaults.num_steps,
+        layers: config.defaults.layers ?? H3_DEFAULT_LAYERS,
+        reuse: config.defaults.reuse ?? H3_DEFAULT_REUSE,
         quality: config.defaults.quality ?? "fast",
       });
       setPrompt(snap.prompt);
@@ -291,6 +315,8 @@ export default function App() {
       setDurationId(snap.durationId);
       setClipMultiplier(snap.clipMultiplier);
       setNumSteps(snap.numSteps);
+      setLayers(snap.layers);
+      setReuse(snap.reuse);
       setSeed(snap.seed);
       setQuality(snap.quality);
     },
@@ -481,6 +507,8 @@ export default function App() {
       num_frames: durationPreset?.num_frames,
       clip_count: isRef2va ? 1 : clipMultiplier,
       num_steps: numSteps,
+      layers,
+      reuse,
       autocontinue: isMultiClip,
       autoconcat: isMultiClip,
       ssd_streaming: ssdStreaming,
@@ -728,17 +756,18 @@ export default function App() {
                     <select
                       value={quality}
                       onChange={(e) => {
-                        setQuality(e.target.value);
-                        if (e.target.value === "four_step") setNumSteps(4);
-                        if (e.target.value === "close") setNumSteps(50);
-                        if (e.target.value === "balanced" || e.target.value === "fast" || e.target.value === "aggressive") {
-                          setNumSteps(20);
-                        }
-                        setTokenReduction(e.target.value === "fast");
+                        const id = e.target.value;
+                        const preset = config.quality_presets.find((p) => p.id === id);
+                        const fields = fieldsFromPreset(preset);
+                        setQuality(id);
+                        setNumSteps(fields.steps);
+                        setLayers(fields.layers);
+                        setReuse(fields.reuse);
+                        setTokenReduction(fields.tokenReduction);
                       }}
                     >
                       {config.quality_presets.map((p) => (
-                        <option key={p.id} value={p.id}>
+                        <option key={p.id} value={p.id} title={p.guidance ?? undefined}>
                           {p.label}
                         </option>
                       ))}
@@ -805,8 +834,36 @@ export default function App() {
                       type="number"
                       min={1}
                       max={50}
+                      title="h3.c --steps (denoising passes)"
                       value={numSteps}
-                      onChange={(e) => setNumSteps(Number(e.target.value))}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        setNumSteps(next);
+                        if (next <= 7) setReuse(1);
+                      }}
+                    />
+                  </label>
+                  <label className="opt-narrow">
+                    Layers
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      title="h3.c --layers (DiT blocks per pass; default 50)"
+                      value={layers}
+                      onChange={(e) => setLayers(Number(e.target.value))}
+                    />
+                  </label>
+                  <label className="opt-narrow">
+                    Reuse
+                    <input
+                      type="number"
+                      min={1}
+                      max={8}
+                      title="h3.c --reuse (exclusive with --core-reuse; default 1)"
+                      value={reuse}
+                      disabled={numSteps <= 7}
+                      onChange={(e) => setReuse(Number(e.target.value))}
                     />
                   </label>
                   <label className="opt-seed">
@@ -840,6 +897,12 @@ export default function App() {
                   </label>
                 </div>
 
+                {quality === "close" && (
+                  <p className="hint hint-inline">
+                    {closePreset?.guidance ??
+                      "Close runs 50 complete 50-block denoiser forwards — the oracle when a fast mode changes subject, anatomy, motion, or composition."}
+                  </p>
+                )}
                 {resolution.guidance && <p className="hint hint-inline">{resolution.guidance}</p>}
 
                 {(needsFirst || needsLast || lastUsesPrimaryUpload) && (

@@ -103,8 +103,10 @@ UI generation modes for v1:
 | `four_step` | Four-step | 4 | 50 | 1 | Keep reuse 1 at small budgets |
 | `aggressive` | Aggressive preview | 20 | 40 | 3 | Internal `320` for `512` output; **no** token-reduction with this combo |
 | `fast` | Fast (UI default) | 20 | 45 | 2 | `--token-reduction`; internal `384` for `512` output |
-| `balanced` | Balanced | 20 | 45 | 2 | Tutorial “validated balanced” |
-| `close` | Close / reference | 50 | 50 | 1 | Slow oracle |
+| `balanced` | Balanced | 20 | 50 | 1 | h3.c CLI defaults |
+| `close` | Close / reference | **50** | 50 | 1 | 50 complete 50-block denoiser forwards. Oracle when a fast mode changes subject, anatomy, motion, or composition. |
+
+The UI always exposes `--steps`, `--layers`, and `--reuse` (preset fills them; testers can then edit). `--steps` 50 on close is explicit: it is much more expensive than the default 20×50 path.
 
 Advanced (collapsed, not on the first row): `--core-reuse` (exclusive with reuse), `--token-reduction`, `--render-width` / `--render-height`, `--ssd-streaming`, `--use-int8-row-fc2` (M5), slower BF16 diagnostic flags only in CLI/env.
 
@@ -167,7 +169,7 @@ Done: `h3_backend.py` one-shot spawn, WS framing, `/api/generate` + library + SS
 
 ### P3 — H3 settings in the UI
 
-Done: quality presets, seed, resolution, duration, steps, token-reduction, SSD streaming. Layers / core-reuse / internal render size remain CLI/body advanced (P8 polish).
+Done: quality presets, seed, resolution, duration, steps, layers, reuse, token-reduction, SSD streaming. Core-reuse / internal render size remain CLI/body advanced (P8 polish).
 
 ### P4 — FL2VA image modes + autocontinue
 

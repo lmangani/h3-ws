@@ -39,13 +39,19 @@ class GenerationCancelledError(RuntimeError):
     """Raised when the user or SIGINT cancelled an in-flight ``h3`` process."""
 
 
+# h3.c CLI defaults. Close keeps --steps 50 explicit: 50 complete 50-block
+# denoiser forwards, vs 20×50 for the default path.
+H3_DEFAULT_STEPS = 20
+H3_DEFAULT_LAYERS = 50
+H3_DEFAULT_REUSE = 1
+
 QUALITY_PRESETS: dict[str, dict[str, Any]] = {
     "four_step": {
         "id": "four_step",
         "label": "Four-step",
         "steps": 4,
-        "layers": 50,
-        "reuse": 1,
+        "layers": H3_DEFAULT_LAYERS,
+        "reuse": H3_DEFAULT_REUSE,
         "core_reuse": None,
         "token_reduction": False,
         "render": None,
@@ -53,7 +59,7 @@ QUALITY_PRESETS: dict[str, dict[str, Any]] = {
     "aggressive": {
         "id": "aggressive",
         "label": "Aggressive preview",
-        "steps": 20,
+        "steps": H3_DEFAULT_STEPS,
         "layers": 40,
         "reuse": 3,
         "core_reuse": None,
@@ -63,7 +69,7 @@ QUALITY_PRESETS: dict[str, dict[str, Any]] = {
     "fast": {
         "id": "fast",
         "label": "Fast",
-        "steps": 20,
+        "steps": H3_DEFAULT_STEPS,
         "layers": 45,
         "reuse": 2,
         "core_reuse": None,
@@ -72,10 +78,10 @@ QUALITY_PRESETS: dict[str, dict[str, Any]] = {
     },
     "balanced": {
         "id": "balanced",
-        "label": "Balanced (default)",
-        "steps": 20,
-        "layers": 45,
-        "reuse": 2,
+        "label": "Balanced",
+        "steps": H3_DEFAULT_STEPS,
+        "layers": H3_DEFAULT_LAYERS,
+        "reuse": H3_DEFAULT_REUSE,
         "core_reuse": None,
         "token_reduction": False,
         "render": None,
@@ -84,16 +90,30 @@ QUALITY_PRESETS: dict[str, dict[str, Any]] = {
         "id": "close",
         "label": "Close / reference",
         "steps": 50,
-        "layers": 50,
-        "reuse": 1,
+        "layers": H3_DEFAULT_LAYERS,
+        "reuse": H3_DEFAULT_REUSE,
         "core_reuse": None,
         "token_reduction": False,
         "render": None,
+        "guidance": (
+            "50 complete 50-block denoiser forwards — much more expensive than "
+            "the default 20×50, but the right oracle when a fast mode changes "
+            "subject, anatomy, motion, or composition."
+        ),
     },
 }
 
 QUALITY_PRESET_LIST = [
-    {"id": p["id"], "label": p["label"]} for p in QUALITY_PRESETS.values()
+    {
+        "id": p["id"],
+        "label": p["label"],
+        "steps": p["steps"],
+        "layers": p["layers"],
+        "reuse": p["reuse"],
+        "token_reduction": p["token_reduction"],
+        "guidance": p.get("guidance"),
+    }
+    for p in QUALITY_PRESETS.values()
 ]
 
 GENERATION_MODES = [
@@ -270,7 +290,7 @@ def expand_quality(
     if steps is not None:
         out["steps"] = max(1, int(steps))
     if layers is not None:
-        out["layers"] = max(1, min(50, int(layers)))
+        out["layers"] = max(1, min(H3_DEFAULT_LAYERS, int(layers)))
     if reuse is not None:
         out["reuse"] = max(1, int(reuse))
     if core_reuse is not None:

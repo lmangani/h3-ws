@@ -1,6 +1,11 @@
 export interface QualityPreset {
   id: string;
   label: string;
+  steps?: number;
+  layers?: number;
+  reuse?: number;
+  token_reduction?: boolean;
+  guidance?: string | null;
 }
 
 export interface PresetOption {
@@ -37,6 +42,8 @@ export interface Config {
     width: number;
     height: number;
     num_steps: number;
+    layers?: number;
+    reuse?: number;
     fps: number;
     quality?: string;
   };
@@ -67,6 +74,8 @@ export interface Clip {
   height?: number;
   seed?: number;
   num_steps?: number;
+  layers?: number;
+  reuse?: number;
   duration_seconds?: number;
   clip_count?: number;
   autocontinue?: boolean;
