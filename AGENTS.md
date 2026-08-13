@@ -20,13 +20,19 @@ This stack does **not** run cloud prompt expansion. What you send is what H3 see
 
 ## Weights (mandatory)
 
-Only the official MiniMax-H3 checkpoint trees. Not LTX, not PyTorch-only CUDA recipes.
+**Never download MiniMax-H3 weights on the development workstation.** Fetch them only on the Apple Silicon test host.
+
+Only the official MiniMax-H3 **native** checkpoint trees. Not LTX, not Diffusers root shards, not community quants.
+
+The Hugging Face repo is ~464 GB. Unfiltered `hf download MiniMaxAI/MiniMax-H3` pulls everything: native `FL2VA/` (~134 GB), native `Ref2VA/` (~134 GB, of which ~72 GB duplicates FL2VA encoder/VAE), and a Diffusers copy at repo root (~196 GB) that h3.c never opens.
+
+On the test host:
 
 ```
-hf download MiniMaxAI/MiniMax-H3 --include "model_index.json" "FL2VA/*" "Ref2VA/*" --local-dir models/MiniMax-H3
+python scripts/download_model.py                 # FL2VA only, ~134 GB; resumes, never deletes
+python scripts/download_model.py --with-ref2va   # + Ref2VA transformer ~62 GB
+python scripts/download_model.py --status        # what is already on disk
 ```
-
-Or: `python scripts/download_model.py`
 
 Build the engine: `./scripts/build_h3.sh` (needs the `third_party/h3.c` submodule).
 

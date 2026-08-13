@@ -25,12 +25,15 @@ uv venv --python 3.12 --seed && source .venv/bin/activate
 uv pip install -r requirements.txt
 
 ./scripts/build_h3.sh
-python scripts/download_model.py
+python scripts/download_model.py          # ~134 GB FL2VA only (enough to generate)
+# python scripts/download_model.py --with-ref2va   # +~62 GB Ref2VA transformer
 
 cd web && npm install && npm run build && cd ..
 ```
 
-Weights come from [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) (`FL2VA/` and `Ref2VA/`) and land in `models/MiniMax-H3`.
+Do **not** `hf download MiniMaxAI/MiniMax-H3` without filters. The Hugging Face repo is ~464 GB: native `FL2VA/` + `Ref2VA/` plus a second Diffusers copy at the repo root (`transformer/`, `transformer_ref/`, `text_encoder/`, `vae/`). There are no extra quantizations in that repo. h3.c only loads the native trees.
+
+Default `python scripts/download_model.py` fetches **FL2VA only** (~134 GB: Qwen encoder + DiT + VAEs). Pass `--with-ref2va` for the extra ~62 GB Ref2VA transformer. Existing files are never deleted; a second run resumes and skips what is already on disk. If a previous unfiltered download already saved root `text_encoder/`, that copy is reused for `FL2VA/text_encoder` instead of downloading it again.
 
 ## Run
 
