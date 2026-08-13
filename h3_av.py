@@ -45,13 +45,18 @@ def _parse_size(text: str) -> tuple[int, int]:
 
 
 def _inputs_and_output(argv: list[str]) -> tuple[list[dict[str, str]], str | None, dict[str, str]]:
-    """Split ffmpeg argv into per-input option dicts, output path, and output options."""
+    """Split ffmpeg argv the way ffmpeg does: options apply to the next ``-i``,
+    then leftover options apply to the output file.
+
+    h3.c muxes with two inputs (``pipe:0`` RGB, ``pipe:N`` PCM). A parser that
+    treats everything after the first ``-i`` as output options misreads
+    ``-f f32le -i pipe:N`` and tries to decode raw video as audio.
+    """
     inputs: list[dict[str, str]] = []
-    current: dict[str, str] = {}
+    pending: dict[str, str] = {}
     output_opts: dict[str, str] = {}
     output: str | None = None
     i = 1
-    seen_input = False
     while i < len(argv):
         token = argv[i]
         if token in ("-y",):
@@ -66,16 +71,17 @@ def _inputs_and_output(argv: list[str]) -> tuple[list[dict[str, str]], str | Non
             else:
                 i += 1
             if key == "i":
-                inputs.append({**current, "path": value})
-                current = {}
-                seen_input = True
-            elif seen_input:
-                output_opts[key] = value
+                inputs.append({**pending, "path": value})
+                pending = {}
             else:
-                current[key] = value
+                pending[key] = value
             continue
         output = token
+        output_opts = pending
+        pending = {}
         i += 1
+    if output is None and pending:
+        output_opts = pending
     return inputs, output, output_opts
 
 
@@ -305,6 +311,21 @@ def _drain_fd(handle, sink: bytearray) -> None:
         sink.extend(chunk)
 
 
+def _add_video_stream(container, fps_frac: Fraction, width: int, height: int):
+    last: Exception | None = None
+    for codec in ("libx264", "h264_videotoolbox", "mpeg4"):
+        try:
+            stream = container.add_stream(codec, rate=fps_frac, width=width, height=height)
+            stream.pix_fmt = "yuv420p"
+            if codec == "libx264":
+                stream.options = {"crf": "18", "preset": "fast"}
+            return stream
+        except Exception as exc:
+            last = exc
+    _die(f"cannot open an H.264 encoder: {last}")
+    raise AssertionError
+
+
 def cmd_encode_mp4(inputs: list[dict[str, str]], output: str) -> None:
     _require_av()
     import av
@@ -336,10 +357,9 @@ def cmd_encode_mp4(inputs: list[dict[str, str]], output: str) -> None:
         audio_thread.start()
 
     fps_frac = Fraction(fps, 1)
+    print(f"h3-av: mux {width}x{height} @{fps}fps → {output}", file=sys.stderr, flush=True)
     with av.open(output, "w") as container:
-        vstream = container.add_stream("libx264", rate=fps_frac, width=width, height=height)
-        vstream.pix_fmt = "yuv420p"
-        vstream.options = {"crf": "18", "preset": "fast"}
+        vstream = _add_video_stream(container, fps_frac, width, height)
         vstream.time_base = Fraction(1, fps)
         astream = None
         layout = "stereo" if audio_channels == 2 else "mono"
@@ -367,27 +387,28 @@ def cmd_encode_mp4(inputs: list[dict[str, str]], output: str) -> None:
             audio_thread.join()
             pcm = np.frombuffer(bytes(audio_blob), dtype="<f4")
             if pcm.size == 0:
-                return
-            if audio_channels > 1:
-                usable = (pcm.size // audio_channels) * audio_channels
-                pcm = pcm[:usable].reshape((-1, audio_channels))
-            sample_count = int(pcm.shape[0]) if pcm.ndim == 2 else int(pcm.size)
-            hop = 1024
-            sample_pts = 0
-            for start in range(0, sample_count, hop):
-                block = pcm[start : start + hop]
-                if block.ndim == 1:
-                    planar = np.ascontiguousarray(block.reshape(1, -1))
-                else:
-                    planar = np.ascontiguousarray(block.T)
-                aframe = av.AudioFrame.from_ndarray(planar, format="fltp", layout=layout)
-                aframe.sample_rate = audio_rate
-                aframe.pts = sample_pts
-                sample_pts += aframe.samples
-                for packet in astream.encode(aframe):
+                print("h3-av: audio pipe was empty; writing video-only MP4", file=sys.stderr, flush=True)
+            else:
+                if audio_channels > 1:
+                    usable = (pcm.size // audio_channels) * audio_channels
+                    pcm = pcm[:usable].reshape((-1, audio_channels))
+                sample_count = int(pcm.shape[0]) if pcm.ndim == 2 else int(pcm.size)
+                hop = 1024
+                sample_pts = 0
+                for start in range(0, sample_count, hop):
+                    block = pcm[start : start + hop]
+                    if block.ndim == 1:
+                        planar = np.ascontiguousarray(block.reshape(1, -1))
+                    else:
+                        planar = np.ascontiguousarray(block.T)
+                    aframe = av.AudioFrame.from_ndarray(planar, format="fltp", layout=layout)
+                    aframe.sample_rate = audio_rate
+                    aframe.pts = sample_pts
+                    sample_pts += aframe.samples
+                    for packet in astream.encode(aframe):
+                        container.mux(packet)
+                for packet in astream.encode(None):
                     container.mux(packet)
-            for packet in astream.encode(None):
-                container.mux(packet)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -407,12 +428,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     inputs, output, output_opts = _inputs_and_output(argv)
     fmt = output_opts.get("f") or ""
+    has_raw_in = any(item.get("f") == "rawvideo" or "video_size" in item for item in inputs)
+    writing_file = bool(output) and output not in {"pipe:1", "pipe:", "-"} and not str(output).startswith("pipe")
+    if has_raw_in and writing_file:
+        cmd_encode_mp4(inputs, output)
+        return 0
     if output in {"pipe:1", "pipe:", "-"} or fmt in {"rawvideo", "f32le"}:
         if not inputs:
             _die("decode requires -i PATH")
         cmd_decode_raw(inputs, output_opts)
         return 0
-    if any(item.get("f") == "rawvideo" or "video_size" in item for item in inputs):
+    if has_raw_in:
         if not output:
             _die("encode requires an output path")
         cmd_encode_mp4(inputs, output)

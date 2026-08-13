@@ -1,6 +1,8 @@
+import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -93,6 +95,96 @@ class H3AvShimTests(unittest.TestCase):
                 ],
                 stdin=raw,
             )
+            self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+            self.assertTrue(out.is_file())
+            self.assertGreater(out.stat().st_size, 32)
+
+    def test_av_mux_argv_keeps_pcm_on_second_input(self) -> None:
+        from h3_av import _inputs_and_output
+
+        argv = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-pixel_format", "rgb24",
+            "-video_size", "1024x768", "-framerate", "24",
+            "-i", "pipe:0",
+            "-f", "f32le", "-ar", "32000", "-ac", "2",
+            "-i", "pipe:7",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart", "/tmp/out.mp4",
+        ]
+        inputs, output, output_opts = _inputs_and_output(argv)
+        self.assertEqual(output, "/tmp/out.mp4")
+        self.assertEqual(len(inputs), 2)
+        self.assertEqual(inputs[0]["f"], "rawvideo")
+        self.assertEqual(inputs[0]["path"], "pipe:0")
+        self.assertEqual(inputs[1]["f"], "f32le")
+        self.assertEqual(inputs[1]["path"], "pipe:7")
+        self.assertEqual(inputs[1]["ar"], "32000")
+        self.assertEqual(output_opts.get("c:v"), "libx264")
+        self.assertNotEqual(output_opts.get("f"), "f32le")
+
+    def test_encode_rgb_and_pcm_mp4(self) -> None:
+        width, height, frames, fps = 32, 32, 8, 24
+        raw = bytes(width * height * 3 * frames)
+        samples = int(32000 * frames / fps)
+        pcm = b"\x00\x00\x00\x00" * 2 * samples
+        r_audio, w_audio = os.pipe()
+
+        def _feed() -> None:
+            remaining = pcm
+            while remaining:
+                written = os.write(w_audio, remaining)
+                remaining = remaining[written:]
+            os.close(w_audio)
+
+        feeder = threading.Thread(target=_feed, daemon=True)
+        feeder.start()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "av.mp4"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(_repo_root() / "h3_av.py"),
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "rgb24",
+                    "-video_size",
+                    f"{width}x{height}",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    "pipe:0",
+                    "-f",
+                    "f32le",
+                    "-ar",
+                    "32000",
+                    "-ac",
+                    "2",
+                    "-i",
+                    f"pipe:{r_audio}",
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "aac",
+                    str(out),
+                ],
+                input=raw,
+                capture_output=True,
+                check=False,
+                pass_fds=(r_audio,),
+            )
+            os.close(r_audio)
+            feeder.join(timeout=5)
             self.assertEqual(proc.returncode, 0, proc.stderr.decode())
             self.assertTrue(out.is_file())
             self.assertGreater(out.stat().st_size, 32)
