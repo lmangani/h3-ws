@@ -1270,7 +1270,13 @@ async def run_uvicorn(app: Any, host: str, port: int, state: AppState | None = N
     _ensure_web_deps()
     import uvicorn
 
-    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    from h3_paths import debug_console
+
+    # Keep our console logger; uvicorn's default log_config would replace it.
+    log_level = "debug" if debug_console() else "info"
+    config = uvicorn.Config(
+        app, host=host, port=port, log_level=log_level, log_config=None
+    )
     server = uvicorn.Server(config)
     if state is not None:
         state._uvicorn_server = server

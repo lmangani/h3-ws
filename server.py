@@ -53,7 +53,7 @@ from h3_backend import (  # noqa: E402
     recommend_ssd_streaming,
 )
 from h3_media import require_ui_canvas, snap_frames  # noqa: E402
-from h3_paths import REPO_ROOT, default_h3_bin, default_model_dir  # noqa: E402
+from h3_paths import REPO_ROOT, debug_console, default_h3_bin, default_model_dir  # noqa: E402
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8765
@@ -410,8 +410,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    if args.verbose:
+    if args.verbose or debug_console():
         logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger("h3").setLevel(logging.DEBUG)
+        logging.getLogger("h3-session").setLevel(logging.DEBUG)
+        logging.getLogger("h3-backend").setLevel(logging.DEBUG)
+    if not debug_console() and not args.verbose:
+        logging.getLogger().setLevel(logging.INFO)
 
     try:
         width, height = require_ui_canvas(args.width, args.height)
@@ -467,6 +472,9 @@ def main() -> None:
     if args.web_ui:
         print(f"  Web UI   : {http_url}")
         ensure_web_dist_built(auto_build=True)
+    print(
+        f"  Console  : h3 progress {'on (DEBUG=false to quiet)' if debug_console() else 'quiet'}"
+    )
     print(f"{'═' * 60}\n", flush=True)
 
     info = engine.info()

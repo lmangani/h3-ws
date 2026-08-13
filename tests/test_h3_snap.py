@@ -25,7 +25,20 @@ class SnapTests(unittest.TestCase):
 
     def test_seconds_to_frames(self) -> None:
         self.assertEqual(seconds_to_frames(0.9), 22)
+        self.assertEqual(seconds_to_frames(1), 22)
+        self.assertEqual(seconds_to_frames(2), 56)
+        self.assertEqual(seconds_to_frames(5), 107)
         self.assertEqual(seconds_to_frames(10), 243)
+        self.assertEqual(seconds_to_frames(15), 362)
+
+    def test_ui_duration_presets_are_rounded(self) -> None:
+        from h3_media import DURATION_PRESETS, UI_DURATION_FRAMES
+
+        self.assertEqual([p["id"] for p in DURATION_PRESETS], ["1s", "2s", "5s", "10s", "15s"])
+        for preset in DURATION_PRESETS:
+            rounded = int(preset["seconds"])
+            self.assertEqual(preset["seconds"], float(rounded))
+            self.assertEqual(preset["num_frames"], UI_DURATION_FRAMES[rounded])
 
     def test_snap_spatial(self) -> None:
         self.assertEqual(snap_spatial(16), 32)
@@ -277,6 +290,24 @@ class SessionCommandTests(unittest.TestCase):
         from h3_paths import h3_process_cwd
 
         self.assertEqual(h3_process_cwd(Path("/opt/h3.c/h3")), Path("/opt/h3.c"))
+
+    def test_debug_console_defaults_on(self) -> None:
+        import os
+
+        from h3_paths import debug_console
+
+        prev = os.environ.pop("DEBUG", None)
+        try:
+            self.assertTrue(debug_console())
+            os.environ["DEBUG"] = "false"
+            self.assertFalse(debug_console())
+            os.environ["DEBUG"] = "true"
+            self.assertTrue(debug_console())
+        finally:
+            if prev is None:
+                os.environ.pop("DEBUG", None)
+            else:
+                os.environ["DEBUG"] = prev
 
 
 class ModelLayoutTests(unittest.TestCase):

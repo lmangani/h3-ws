@@ -21,7 +21,14 @@ from h3_media import (
     require_ui_canvas,
     snap_frames,
 )
-from h3_paths import default_h3_bin, default_model_dir, h3_media_env, h3_process_cwd, mk_scratch_file
+from h3_paths import (
+    console_h3,
+    default_h3_bin,
+    default_model_dir,
+    h3_media_env,
+    h3_process_cwd,
+    mk_scratch_file,
+)
 
 log = logging.getLogger("h3-backend")
 
@@ -743,7 +750,7 @@ class H3Engine:
                     tail.append(stripped)
                     if len(tail) > 80:
                         del tail[:-80]
-                log.info("h3: %s", stripped)
+                    console_h3("%s", stripped)
             rc = proc.wait()
         finally:
             self._proc = None

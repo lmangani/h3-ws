@@ -56,6 +56,34 @@ def h3_process_cwd(h3_bin: Path | str | None = None) -> Path:
     return binary.expanduser().resolve().parent
 
 
+def debug_console() -> bool:
+    """Dump h3 progress to the server console unless ``DEBUG=false``."""
+    raw = os.environ.get("DEBUG")
+    if raw is None or not str(raw).strip():
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+_last_console_line = ""
+
+
+def console_h3(message: str, *args: object) -> None:
+    """Print an h3 line to the server log when console debug is on."""
+    if not debug_console():
+        return
+    import logging
+
+    text = message % args if args else message
+    text = " ".join(str(text).split())
+    if not text:
+        return
+    global _last_console_line
+    if text == _last_console_line:
+        return
+    _last_console_line = text
+    logging.getLogger("h3").info("%s", text[:300])
+
+
 def default_model_dir() -> Path:
     env = os.environ.get("H3_MODEL_DIR", "").strip() or os.environ.get(
         "H3_WS_MODEL_DIR", ""

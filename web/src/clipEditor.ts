@@ -24,7 +24,7 @@ export function durationIdForClip(clip: Clip, config: Config | null): string {
     const match = config?.duration_presets.find((d) => d.seconds === clip.duration_seconds);
     if (match) return match.id;
   }
-  return config?.duration_presets[0]?.id ?? "0.9s";
+  return config?.duration_presets[0]?.id ?? "1s";
 }
 
 export interface ClipEditorSnapshot {

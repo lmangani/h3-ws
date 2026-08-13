@@ -33,8 +33,23 @@ def frames_to_seconds(num_frames: int, fps: int = FPS) -> float:
     return float(num_frames) / float(fps)
 
 
+# Rounded UI lengths → legal ``5+17n`` frame counts (not the exact 24 fps math).
+UI_DURATION_FRAMES: dict[int, int] = {
+    1: 22,
+    2: 56,
+    5: 107,
+    10: 243,
+    15: 362,
+}
+
+
 def seconds_to_frames(seconds: float, fps: int = FPS) -> int:
-    raw = int(math.ceil(float(seconds) * fps))
+    sec = float(seconds)
+    for rounded, frames in UI_DURATION_FRAMES.items():
+        actual = frames_to_seconds(frames, fps=fps)
+        if abs(sec - rounded) < 0.05 or abs(sec - actual) < 0.05:
+            return frames
+    raw = int(math.ceil(sec * fps))
     return snap_frames(raw)
 
 
@@ -57,29 +72,28 @@ def validate_canvas(width: int, height: int) -> tuple[int, int]:
 
 
 def duration_preset(
-    preset_id: str, *, num_frames: int, note: str = ""
+    rounded_s: int, *, num_frames: int, note: str = ""
 ) -> dict[str, Any]:
     nf = snap_frames(int(num_frames))
-    seconds = frames_to_seconds(nf)
-    label = f"~{seconds:.3g} s ({nf} frames @ {FPS} fps)"
+    label = f"{rounded_s}s ({nf} frames @ {FPS} fps)"
     if note:
         label = f"{label} — {note}"
     return {
-        "id": preset_id,
-        "seconds": round(seconds, 3),
+        "id": f"{rounded_s}s",
+        "seconds": float(rounded_s),
         "num_frames": nf,
         "label": label,
     }
 
 
 DURATION_PRESETS = [
-    duration_preset("0.9s", num_frames=22, note="dev"),
-    duration_preset("1.6s", num_frames=39),
-    duration_preset("2.3s", num_frames=56),
-    duration_preset("4.5s", num_frames=107, note="UI default"),
-    duration_preset("10s", num_frames=243),
-    duration_preset("15s", num_frames=362),
+    duration_preset(1, num_frames=UI_DURATION_FRAMES[1], note="dev"),
+    duration_preset(2, num_frames=UI_DURATION_FRAMES[2]),
+    duration_preset(5, num_frames=UI_DURATION_FRAMES[5]),
+    duration_preset(10, num_frames=UI_DURATION_FRAMES[10]),
+    duration_preset(15, num_frames=UI_DURATION_FRAMES[15]),
 ]
+
 
 def _canvas(
     preset_id: str,

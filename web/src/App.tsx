@@ -119,9 +119,19 @@ function formatBytes(n?: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const ROUNDED_DURATIONS: [number, number][] = [
+  [22, 1],
+  [56, 2],
+  [107, 5],
+  [243, 10],
+  [362, 15],
+];
+
 function formatDuration(frames?: number, fps = 24) {
   if (!frames) return "";
-  return `${(frames / fps).toFixed(1)}s`;
+  const hit = ROUNDED_DURATIONS.find(([nf]) => nf === frames);
+  if (hit) return `${hit[1]}s`;
+  return `${Math.round(frames / fps)}s`;
 }
 
 function pickPlaybackClip(clips: Clip[], chainId: string): string | null {
@@ -176,7 +186,7 @@ export default function App() {
   const [mode, setMode] = useState("t2va");
   const [quality, setQuality] = useState("balanced");
   const [resolutionId, setResolutionId] = useState("512x512");
-  const [durationId, setDurationId] = useState("0.9s");
+  const [durationId, setDurationId] = useState("1s");
   const [clipMultiplier, setClipMultiplier] = useState(1);
   const [numSteps, setNumSteps] = useState(20);
   const [seed, setSeed] = useState("");
@@ -769,7 +779,7 @@ export default function App() {
                     <select value={durationId} onChange={(e) => setDurationId(e.target.value)}>
                       {config.duration_presets.map((d) => (
                         <option key={d.id} value={d.id} title={d.label}>
-                          {`~${d.seconds}s`}
+                          {d.id}
                         </option>
                       ))}
                     </select>

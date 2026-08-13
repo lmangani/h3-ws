@@ -125,12 +125,11 @@ Advanced (collapsed, not on the first row): `--core-reuse` (exclusive with reuse
 
 | Request | Frames | Actual |
 |---------|--------|--------|
-| ~0.9 s (dev) | 22 | 0.917 s |
-| ~1.6 s | 39 | 1.625 s |
-| ~2.3 s | 56 | 2.333 s |
-| ~4.5 s | 107 | 4.458 s |
-| ~10 s | 243 | 10.125 s |
-| ~15 s | 362 | 15.083 s |
+| 1s (dev) | 22 | 0.917 s |
+| 2s | 56 | 2.333 s |
+| 5s | 107 | 4.458 s |
+| 10s | 243 | 10.125 s |
+| 15s | 362 | 15.083 s |
 
 Released workflow is **~4–15 s**. Short clips are for iteration.
 

@@ -24,6 +24,7 @@ from typing import Any
 
 from h3_backend import GenerateRequest, GenerationCancelledError, expand_quality
 from h3_media import require_ui_canvas, snap_frames
+from h3_paths import console_h3
 
 log = logging.getLogger("h3-session")
 
@@ -68,6 +69,13 @@ def parse_outputs_dir(text: str) -> Path | None:
     if not match:
         return None
     return Path(match.group(1).strip())
+
+
+def _echo_pty(chunk: str) -> None:
+    for line in strip_ansi(chunk).replace("\r", "\n").splitlines():
+        text = line.strip()
+        if text and text != "h3>":
+            console_h3("%s", text)
 
 
 def parse_cli_progress(chunk: str) -> dict[str, Any] | None:
@@ -249,7 +257,11 @@ class H3InteractiveSession:
         self._master = master
         self._proc = proc
         try:
-            boot = self._read_until(has_repl_prompt, timeout_s)
+            boot = self._read_until(
+                has_repl_prompt,
+                timeout_s,
+                on_chunk=lambda chunk: _echo_pty(chunk),
+            )
         except Exception:
             self.stop()
             raise
@@ -260,7 +272,11 @@ class H3InteractiveSession:
     def apply_request(self, req: GenerateRequest, timeout_s: float = 60.0) -> None:
         for cmd in session_commands_for_request(req):
             self._send_line(cmd)
-            self._read_until(has_repl_prompt, timeout_s)
+            self._read_until(
+                has_repl_prompt,
+                timeout_s,
+                on_chunk=lambda chunk: _echo_pty(chunk),
+            )
 
     def generate(
         self,
@@ -283,6 +299,7 @@ class H3InteractiveSession:
 
         def on_chunk(chunk: str) -> None:
             collected.append(chunk)
+            _echo_pty(chunk)
             progress = parse_cli_progress(chunk)
             if progress and on_progress:
                 on_progress(progress)
@@ -330,6 +347,7 @@ class H3InteractiveSession:
             self.alive = False
             raise SessionError("interactive h3 is not running")
         payload = (line.rstrip("\r\n") + "\r").encode("utf-8")
+        console_h3("h3> %s", line.rstrip("\r\n")[:200])
         try:
             os.write(self._master, payload)
         except OSError as exc:
