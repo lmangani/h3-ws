@@ -74,8 +74,9 @@ def parse_outputs_dir(text: str) -> Path | None:
 def _echo_pty(chunk: str) -> None:
     for line in strip_ansi(chunk).replace("\r", "\n").splitlines():
         text = line.strip()
-        if text and text != "h3>":
-            console_h3("%s", text)
+        if not text or text == "h3>" or _PROGRESS_RE.search(text):
+            continue
+        console_h3("%s", text)
 
 
 def parse_cli_progress(chunk: str) -> dict[str, Any] | None:

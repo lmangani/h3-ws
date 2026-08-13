@@ -279,6 +279,26 @@ class SessionCommandTests(unittest.TestCase):
         self.assertEqual(progress["step"], 4)
         self.assertEqual(progress["total"], 20)
 
+    def test_progress_eta_matches_step_rate(self) -> None:
+        from h3_backend import ProgressEta, _format_mmss, progress_console_line
+
+        eta = ProgressEta()
+        t0 = 1_000.0
+        eta.enrich({"stage": "denoise", "step": 0, "total": 20}, now=t0)
+        mid = eta.enrich(
+            {"stage": "denoise", "step": 4, "total": 20, "label": "denoise 4/20"},
+            now=t0 + 40.0,
+        )
+        self.assertEqual(mid["avg_step_s"], 10.0)
+        self.assertEqual(mid["eta_s"], 160.0)
+        self.assertIn("02:40 remaining", progress_console_line(mid))
+        self.assertEqual(_format_mmss(54), "00:54")
+        later = eta.enrich(
+            {"stage": "video VAE load", "step": 1, "total": 36},
+            now=t0 + 50.0,
+        )
+        self.assertIsNone(later.get("eta_s"))
+
     def test_repl_prompt_detects_linenoise_cr(self) -> None:
         from h3_session import has_repl_prompt
 

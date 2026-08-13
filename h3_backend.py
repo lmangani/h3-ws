@@ -110,6 +110,55 @@ _STEP_RE = re.compile(
 )
 
 
+def _format_mmss(seconds: float) -> str:
+    s = max(0, int(round(float(seconds))))
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
+class ProgressEta:
+    """tqdm-style remaining time from h3.c ``phase completed/total`` lines.
+
+    h3.c does not print ETA. ``--profile`` is after-the-fact Metal timings.
+    """
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.stage: str | None = None
+        self.t0: float = 0.0
+
+    def enrich(self, mp: dict[str, Any], *, now: float | None = None) -> dict[str, Any]:
+        clock = time.time() if now is None else now
+        stage = str(mp.get("stage") or "")
+        step = mp.get("step")
+        total = mp.get("total")
+        if stage != self.stage:
+            self.stage = stage
+            self.t0 = clock
+        if not isinstance(step, int) or not isinstance(total, int) or total <= 0:
+            return mp
+        if "pct" not in mp:
+            mp["pct"] = round(100.0 * step / total, 1)
+        elapsed = clock - self.t0
+        if step <= 0 or elapsed <= 0:
+            return mp
+        rate = step / elapsed
+        mp["avg_step_s"] = round(1.0 / rate, 2)
+        mp["eta_s"] = round(max(0, total - step) / rate, 1)
+        return mp
+
+
+def progress_console_line(mp: dict[str, Any]) -> str:
+    label = str(mp.get("label") or mp.get("stage") or "h3")
+    parts = [label]
+    if mp.get("eta_s") is not None:
+        parts.append(f"{_format_mmss(float(mp['eta_s']))} remaining")
+    if mp.get("avg_step_s") is not None:
+        parts.append(f"{mp['avg_step_s']}s/it")
+    return "  ".join(parts)
+
+
 def physical_memory_bytes() -> int | None:
     if sys.platform == "darwin":
         try:
@@ -490,6 +539,7 @@ class H3Engine:
         self._progress: dict[str, Any] = {}
         self._t0 = 0.0
         self._session: Any | None = None
+        self._eta = ProgressEta()
 
     def model_progress_for_ws(self) -> dict[str, Any] | None:
         p = dict(self._progress)
@@ -578,7 +628,17 @@ class H3Engine:
             "label": line[:160],
         }
         m = _STEP_RE.search(line)
-        if m:
+        phase_m = re.match(r"(.{1,40}?)\s+(\d+)/(\d+)\s*$", line)
+        if phase_m:
+            phase = phase_m.group(1).strip()
+            step, total = int(phase_m.group(2)), int(phase_m.group(3))
+            mp["stage"] = phase or "generating"
+            mp["step"] = step
+            mp["total"] = total
+            mp["label"] = f"{phase} {step}/{total}"
+            if total > 0:
+                mp["pct"] = round(100.0 * step / total, 1)
+        elif m:
             step, total = int(m.group(1)), int(m.group(2))
             mp["step"] = step
             mp["total"] = total
@@ -586,6 +646,7 @@ class H3Engine:
                 mp["pct"] = round(100.0 * step / total, 1)
         elif steps > 0:
             mp["total"] = steps
+        self._eta.enrich(mp)
         self._progress = mp
 
     def generate(
@@ -661,6 +722,7 @@ class H3Engine:
         )
         self._cancel.clear()
         self._t0 = time.time()
+        self._eta.reset()
         self._progress = {"stage": "starting", "elapsed_s": 0, "total": q["steps"]}
         if on_progress:
             on_progress(self._progress)
@@ -668,7 +730,9 @@ class H3Engine:
         def _on_progress(mp: dict[str, Any]) -> None:
             mp = dict(mp)
             mp["elapsed_s"] = round(time.time() - self._t0, 1)
+            self._eta.enrich(mp)
             self._progress = mp
+            console_h3("%s", progress_console_line(mp))
             if on_progress:
                 on_progress(mp)
 
@@ -715,6 +779,7 @@ class H3Engine:
 
         self._cancel.clear()
         self._t0 = time.time()
+        self._eta.reset()
         self._progress = {"stage": "starting", "elapsed_s": 0, "total": q["steps"]}
         if on_progress:
             on_progress(self._progress)
@@ -750,7 +815,10 @@ class H3Engine:
                     tail.append(stripped)
                     if len(tail) > 80:
                         del tail[:-80]
-                    console_h3("%s", stripped)
+                    if self._progress.get("step") is not None:
+                        console_h3("%s", progress_console_line(self._progress))
+                    else:
+                        console_h3("%s", stripped)
             rc = proc.wait()
         finally:
             self._proc = None
