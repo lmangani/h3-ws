@@ -22,11 +22,59 @@ CROP_RE = re.compile(r"crop=(\d+):(\d+)")
 SIZE_RE = re.compile(r"^(\d+)x(\d+)$")
 PIPE_RE = re.compile(r"^pipe:(\d+)$")
 FPS_RE = re.compile(r"(?:^|,)fps=(\d+(?:\.\d+)?)")
+_SHIM_NAMES = {"h3-av", "h3-ffmpeg", "h3-ffprobe", "h3_av.py"}
 
 
 def _die(message: str, code: int = 1) -> None:
-    print(message, file=sys.stderr)
+    print(message, file=sys.stderr, flush=True)
     raise SystemExit(code)
+
+
+def _looks_like_shim(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    if resolved.name in _SHIM_NAMES:
+        return True
+    try:
+        if resolved == Path(__file__).resolve():
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def real_ffmpeg() -> str | None:
+    """System ffmpeg, never this shim or ``scripts/.h3-av-bin/ffmpeg``."""
+    if os.environ.get("H3_AV_FORCE_PYAV", "").strip().lower() in {"1", "true", "yes"}:
+        return None
+    folders: list[str] = []
+    for part in os.environ.get("PATH", "").split(os.pathsep):
+        if part:
+            folders.append(part)
+    folders.extend(["/opt/homebrew/bin", "/usr/local/bin"])
+    seen: set[str] = set()
+    for folder in folders:
+        candidate = Path(folder) / "ffmpeg"
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if not os.path.isfile(candidate) or not os.access(candidate, os.X_OK):
+            continue
+        if _looks_like_shim(candidate):
+            continue
+        return str(candidate)
+    return None
+
+
+def _exec_system_ffmpeg(argv: list[str]) -> None:
+    binary = real_ffmpeg()
+    if not binary:
+        return
+    print(f"h3-av: mux via {binary}", file=sys.stderr, flush=True)
+    os.execv(binary, [binary, *argv[1:]])
 
 
 def _require_av() -> None:
@@ -431,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
     has_raw_in = any(item.get("f") == "rawvideo" or "video_size" in item for item in inputs)
     writing_file = bool(output) and output not in {"pipe:1", "pipe:", "-"} and not str(output).startswith("pipe")
     if has_raw_in and writing_file:
+        _exec_system_ffmpeg(argv)
         cmd_encode_mp4(inputs, output)
         return 0
     if output in {"pipe:1", "pipe:", "-"} or fmt in {"rawvideo", "f32le"}:
@@ -441,8 +490,13 @@ def main(argv: list[str] | None = None) -> int:
     if has_raw_in:
         if not output:
             _die("encode requires an output path")
+        _exec_system_ffmpeg(argv)
         cmd_encode_mp4(inputs, output)
         return 0
+    binary = real_ffmpeg()
+    if binary:
+        print(f"h3-av: unrecognized argv, handing off to {binary}", file=sys.stderr, flush=True)
+        os.execv(binary, [binary, *argv[1:]])
     _die("h3-av: unrecognized ffmpeg argv: " + " ".join(argv[1:40]))
     return 2
 

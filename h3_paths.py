@@ -122,7 +122,7 @@ def ffmpeg_shim_bindir() -> Path:
 
 
 def h3_media_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """Force h3.c to posix_spawn the PyAV shim instead of system ffmpeg."""
+    """Point h3.c at ``scripts/h3-av``. The shim execs system ffmpeg for mux when present."""
     import sys
 
     env = dict(base if base is not None else os.environ)

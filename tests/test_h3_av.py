@@ -15,11 +15,14 @@ def _repo_root() -> Path:
 
 def _run_av(argv: list[str], *, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
     script = _repo_root() / "h3_av.py"
+    env = os.environ.copy()
+    env["H3_AV_FORCE_PYAV"] = "1"
     return subprocess.run(
         [sys.executable, str(script), *argv],
         input=stdin,
         capture_output=True,
         check=False,
+        env=env,
     )
 
 
@@ -182,12 +185,28 @@ class H3AvShimTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
                 pass_fds=(r_audio,),
+                env={**os.environ, "H3_AV_FORCE_PYAV": "1"},
             )
             os.close(r_audio)
             feeder.join(timeout=5)
             self.assertEqual(proc.returncode, 0, proc.stderr.decode())
             self.assertTrue(out.is_file())
             self.assertGreater(out.stat().st_size, 32)
+
+    def test_real_ffmpeg_skips_shim_bindir(self) -> None:
+        from h3_av import real_ffmpeg
+        from h3_paths import ffmpeg_shim_bindir
+
+        bindir = ffmpeg_shim_bindir()
+        found = real_ffmpeg()
+        if found:
+            self.assertNotEqual(Path(found).resolve(), (bindir / "ffmpeg").resolve())
+            self.assertFalse(Path(found).name.startswith("h3-av"))
+        os.environ["H3_AV_FORCE_PYAV"] = "1"
+        try:
+            self.assertIsNone(real_ffmpeg())
+        finally:
+            os.environ.pop("H3_AV_FORCE_PYAV", None)
 
     def test_media_shim_ok(self) -> None:
         from h3_media import media_shim_ok
