@@ -50,7 +50,6 @@ from h3_backend import (  # noqa: E402
     H3Engine,
     parse_refs_payload,
     ram_gb,
-    recommend_ssd_streaming,
 )
 from h3_media import require_ui_canvas, snap_frames  # noqa: E402
 from h3_paths import REPO_ROOT, debug_console, default_h3_bin, default_model_dir  # noqa: E402
@@ -60,7 +59,7 @@ DEFAULT_PORT = 8765
 DEFAULT_WIDTH = 512
 DEFAULT_HEIGHT = 512
 DEFAULT_NUM_FRAMES = 22
-DEFAULT_QUALITY = "balanced"
+DEFAULT_QUALITY = "fast"
 DEFAULT_CHUNK_SIZE = 64 * 1024
 GENERATION_KEEPALIVE_INTERVAL_S = 1.0
 
@@ -212,7 +211,7 @@ class RequestHandler:
             frames = snap_frames(self._msg_int(msg, "num_frames", int(self.defaults["num_frames"])))
             steps = self._msg_int(msg, "num_steps", int(self.defaults.get("num_steps") or 20))
             seed = self._msg_int(msg, "seed", -1)
-            quality = str(msg.get("quality") or self.defaults.get("quality") or "balanced")
+            quality = str(msg.get("quality") or self.defaults.get("quality") or "fast")
             if "ssd_streaming" in msg:
                 ssd = bool(msg.get("ssd_streaming"))
             else:
@@ -397,8 +396,8 @@ def build_parser() -> argparse.ArgumentParser:
     vid.add_argument(
         "--ssd-streaming",
         action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Stream DiT weights from SSD. Default: on when RAM < 64 GB.",
+        default=False,
+        help="Stream DiT weights from SSD (saves RAM, much slower denoise). Default: off.",
     )
     ui = p.add_argument_group("web ui")
     ui.add_argument("--web-ui", action=argparse.BooleanOptionalAction, default=True)
@@ -423,9 +422,7 @@ def main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     frames = snap_frames(args.num_frames)
-    ssd = args.ssd_streaming
-    if ssd is None:
-        ssd = recommend_ssd_streaming()
+    ssd = bool(args.ssd_streaming)
 
     engine = H3Engine(
         h3_bin=args.h3_bin,
@@ -467,7 +464,9 @@ def main() -> None:
     print(f"  Model    : {engine.model_dir}")
     print(f"  Canvas   : {width}×{height}  frames={frames}  quality={args.quality}")
     if gb is not None:
-        print(f"  RAM      : ~{gb:.0f} GB unified" + ("  (SSD streaming on)" if ssd else ""))
+        print(f"  RAM      : ~{gb:.0f} GB unified" + ("  (SSD streaming on — slower denoise)" if ssd else ""))
+    if engine.metal4:
+        print("  GPU      : Metal 4 — --use-int8-row-fc2 on")
     print(f"  Endpoint : {ws_url}")
     if args.web_ui:
         print(f"  Web UI   : {http_url}")

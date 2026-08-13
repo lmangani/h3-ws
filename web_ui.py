@@ -529,7 +529,7 @@ def _clip_settings_from_body(body: dict[str, Any]) -> dict[str, Any]:
         "clip_count": int(body.get("clip_count") or 1),
         "autocontinue": bool(body.get("autocontinue")),
         "autoconcat": bool(body.get("autoconcat")),
-        "quality": str(body.get("quality") or "balanced"),
+        "quality": str(body.get("quality") or "fast"),
         "render_width": int(body["render_width"]) if body.get("render_width") else None,
         "render_height": int(body["render_height"]) if body.get("render_height") else None,
     }
@@ -600,7 +600,7 @@ def _request_from_body(
         width=int(settings["width"] or 512),
         height=int(settings["height"] or 512),
         num_frames=int(settings["num_frames"] or 22),
-        quality=str(settings.get("quality") or "balanced"),
+        quality=str(settings.get("quality") or "fast"),
         steps=int(settings["num_steps"] or 20),
         layers=int(body["layers"]) if body.get("layers") is not None else None,
         reuse=int(body["reuse"]) if body.get("reuse") is not None else None,
@@ -890,7 +890,7 @@ def create_app(
             "height": 512,
             "num_steps": 20,
             "fps": FPS,
-            "quality": "balanced",
+            "quality": "fast",
         }
 
     @app.get("/api/health")
@@ -926,7 +926,9 @@ def create_app(
         if gb is not None:
             note += f" This Mac reports ~{gb:.0f} GB unified memory."
         if ssd:
-            note += " SSD streaming is recommended below 64 GB."
+            note += " Under 64 GB RAM: leave SSD streaming off unless a run is killed for memory — it makes denoise much slower."
+        if info.get("metal4"):
+            note += " Metal 4 GPU: int8-row-fc2 is on."
         if not info.get("ok"):
             note += f" Engine: {info.get('error') or 'not ready'}."
         return {
@@ -940,6 +942,7 @@ def create_app(
             "model_dir": str(state.engine.model_dir),
             "ram_gb": gb,
             "recommend_ssd_streaming": ssd,
+            "metal4": bool(info.get("metal4")),
             "quality_presets": QUALITY_PRESET_LIST,
             "resolution_presets": RESOLUTION_PRESETS,
             "duration_presets": DURATION_PRESETS,

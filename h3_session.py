@@ -134,7 +134,12 @@ def session_commands_for_request(req: GenerateRequest) -> list[str]:
         cmds.append("!core-reuse 1")
         cmds.append(f"!reuse {int(q.get('reuse') or 1)}")
     cmds.append("!token-reduction on" if q.get("token_reduction") else "!token-reduction off")
-    cmds.append("!ssd-streaming on" if req.ssd_streaming else "!ssd-streaming off")
+    if req.ssd_streaming:
+        cmds.append("!int8-row-fc2 off")
+        cmds.append("!ssd-streaming on")
+    else:
+        cmds.append("!ssd-streaming off")
+        cmds.append("!int8-row-fc2 on" if req.int8_row_fc2 else "!int8-row-fc2 off")
     render = q.get("render")
     if render:
         cmds.append(f"!render-size {int(render[0])}x{int(render[1])}")
@@ -201,6 +206,8 @@ def build_session_argv(
         cmd.extend(["--render-width", str(render[0]), "--render-height", str(render[1])])
     if req.ssd_streaming:
         cmd.append("--ssd-streaming")
+    elif req.int8_row_fc2:
+        cmd.append("--use-int8-row-fc2")
     if req.profile:
         cmd.append("--profile")
     return cmd

@@ -44,7 +44,7 @@ python server.py
 
 Or double-click `Start H3-WS.command`.
 
-Default generate is 512×512, **1s** (22 frames), **balanced** quality. Lower RAM:
+Default generate is 512×512, **1s** (22 frames), **fast** quality (token-reduction + 384 internal render). Lower RAM if a run is killed for memory (this makes denoise slower):
 
 ```bash
 python server.py --ssd-streaming
@@ -62,7 +62,7 @@ Prompts should describe scene, action, camera, look, and audio. What you type is
 
 First/last-frame anchors cannot be mixed with Ref2VA references. For references, prompt with `Picture 1`, `Video 1`, `Audio 1` in list order. Standalone audio must accompany an image or video (≤9 images, ≤3 videos, ≤3 audio).
 
-**Quality:** Four-step · Aggressive · Fast · Balanced (default) · Close.
+**Quality:** Four-step · Aggressive · Fast (default) · Balanced · Close.
 
 **Canvas** (dropdown, grouped): **1:1** 256×256 preview, 512×512 (safest), 512×512 with 384 or 320 internal, 768×768. **16:9** 1024×576 (exact) and 1248×704 (largest under the cap). **7:4** 1344×768 max landscape. **4:3** 1024×768. **5:4** 960×768. **4:5** 768×960 Instagram/social. **3:4** 768×1024. **9:16** 576×1024 (exact Stories/Reels/TikTok) and 704×1248 (largest). **4:7** 768×1344 max portrait. Each side is a multiple of 32; pixel count cannot exceed 768×1344. True 768p 16:9 (1365×768) does not fit that cap. H3-Base is a 768p model; 512×512 is the usual working size.
 

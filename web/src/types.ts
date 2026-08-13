@@ -26,6 +26,7 @@ export interface Config {
   model_dir?: string;
   ram_gb?: number | null;
   recommend_ssd_streaming?: boolean;
+  metal4?: boolean;
   quality_presets: QualityPreset[];
   resolution_presets: PresetOption[];
   duration_presets: PresetOption[];

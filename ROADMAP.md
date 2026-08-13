@@ -102,8 +102,8 @@ UI generation modes for v1:
 |----|-------|-----------|------------|-----------|--------|
 | `four_step` | Four-step | 4 | 50 | 1 | Keep reuse 1 at small budgets |
 | `aggressive` | Aggressive preview | 20 | 40 | 3 | Internal `320` for `512` output; **no** token-reduction with this combo |
-| `fast` | Fast | 20 | 45 | 2 | Optional `--token-reduction` |
-| `balanced` | Balanced (UI default) | 20 | 45 | 2 | Tutorial “validated balanced” |
+| `fast` | Fast (UI default) | 20 | 45 | 2 | `--token-reduction`; internal `384` for `512` output |
+| `balanced` | Balanced | 20 | 45 | 2 | Tutorial “validated balanced” |
 | `close` | Close / reference | 50 | 50 | 1 | Slow oracle |
 
 Advanced (collapsed, not on the first row): `--core-reuse` (exclusive with reuse), `--token-reduction`, `--render-width` / `--render-height`, `--ssd-streaming`, `--use-int8-row-fc2` (M5), slower BF16 diagnostic flags only in CLI/env.
@@ -140,10 +140,10 @@ Released workflow is **~4–15 s**. Short clips are for iteration.
 | `--host` / `--port` | `0.0.0.0` / `8765` | Web UI + `/ws` |
 | `--h3-bin` | `third_party/h3.c/h3` | Built binary |
 | `--model-dir` | `./models/MiniMax-H3` | HF snapshot with `FL2VA/` + `Ref2VA/` |
-| `--quality` | `balanced` | Preset above |
+| `--quality` | `fast` | Preset above |
 | `--width` / `--height` | `512` / `512` | Snap to ×32; enforce pixel cap |
 | `--frames` or `--seconds` | 22 frames | Snap to `5+17n` |
-| `--ssd-streaming` | off; auto-hint below ~64 GB RAM | Memory/speed tradeoff |
+| `--ssd-streaming` | off | Memory/speed tradeoff; ~2× slower denoise. Do not auto-enable. |
 | `--web-output-dir` | `./web_outputs` | Library |
 | `--no-web-ui` | off | WS only |
 

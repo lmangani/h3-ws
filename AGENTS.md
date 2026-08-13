@@ -50,6 +50,6 @@ Do not mix first/last-frame anchors with Ref2VA references. Prompt Ref2VA with `
 
 ## Quality presets
 
-`four_step` · `aggressive` · `fast` · `balanced` (default) · `close`
+`four_step` · `aggressive` · `fast` (default) · `balanced` · `close`
 
-`--reuse` and `--core-reuse` are mutually exclusive. Do not combine token-reduction with `--layers 40 --reuse 3`.
+`--reuse` and `--core-reuse` are mutually exclusive. Do not combine token-reduction with `--layers 40 --reuse 3`. `--ssd-streaming` saves RAM and makes denoise much slower — leave it off unless the process is killed for memory. On M5, `--use-int8-row-fc2` is on automatically.

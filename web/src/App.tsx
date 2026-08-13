@@ -184,14 +184,14 @@ export default function App() {
   const [frameLibrary, setFrameLibrary] = useState<LibraryFrame[]>([]);
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("t2va");
-  const [quality, setQuality] = useState("balanced");
+  const [quality, setQuality] = useState("fast");
   const [resolutionId, setResolutionId] = useState("512x512");
   const [durationId, setDurationId] = useState("1s");
   const [clipMultiplier, setClipMultiplier] = useState(1);
   const [numSteps, setNumSteps] = useState(20);
   const [seed, setSeed] = useState("");
   const [ssdStreaming, setSsdStreaming] = useState(false);
-  const [tokenReduction, setTokenReduction] = useState(false);
+  const [tokenReduction, setTokenReduction] = useState(true);
   const [showOptions, setShowOptions] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -251,9 +251,10 @@ export default function App() {
     fetchConfig()
       .then((cfg) => {
         setConfig(cfg);
-        setQuality(cfg.defaults.quality ?? "balanced");
+        setQuality(cfg.defaults.quality ?? "fast");
         setNumSteps(cfg.defaults.num_steps);
-        setSsdStreaming(Boolean(cfg.recommend_ssd_streaming));
+        setTokenReduction((cfg.defaults.quality ?? "fast") === "fast");
+        setSsdStreaming(false);
         const defRes =
           cfg.resolution_presets.find((r) => r.id === "512x512") ??
           cfg.resolution_presets.find(
@@ -282,7 +283,7 @@ export default function App() {
       if (!config) return;
       const snap = snapshotFromClip(clip, config, {
         numSteps: config.defaults.num_steps,
-        quality: config.defaults.quality ?? "balanced",
+        quality: config.defaults.quality ?? "fast",
       });
       setPrompt(snap.prompt);
       setMode(snap.mode);
@@ -826,7 +827,7 @@ export default function App() {
                       checked={ssdStreaming}
                       onChange={(e) => setSsdStreaming(e.target.checked)}
                     />
-                    SSD streaming (lower RAM)
+                    SSD streaming (saves RAM, slower denoise)
                   </label>
                   <label className="check">
                     <input

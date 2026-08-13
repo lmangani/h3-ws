@@ -202,6 +202,38 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--render-height") + 1], "384")
         self.assertEqual(argv[argv.index("--width") + 1], "512")
 
+    def test_fast_preset_uses_token_reduction_and_384(self) -> None:
+        q = expand_quality("fast", width=512, height=512)
+        self.assertTrue(q["token_reduction"])
+        self.assertEqual(q["render"], (384, 384))
+        req = GenerateRequest(
+            prompt="x",
+            output_path=Path("/tmp/out.mp4"),
+            quality="fast",
+        )
+        argv = build_h3_argv(h3_bin=Path("/opt/h3"), model_dir=Path("/m"), req=req)
+        self.assertIn("--token-reduction", argv)
+        self.assertEqual(argv[argv.index("--render-width") + 1], "384")
+
+    def test_int8_row_fc2_not_combined_with_ssd(self) -> None:
+        from h3_backend import metal4_gpu, resolve_int8_row_fc2
+
+        self.assertTrue(metal4_gpu("Apple M5 Max"))
+        self.assertFalse(metal4_gpu("Apple M3 Max"))
+        req = GenerateRequest(prompt="x", output_path=Path("/tmp/out.mp4"), ssd_streaming=True)
+        self.assertFalse(resolve_int8_row_fc2(req, metal4=True))
+        req = GenerateRequest(
+            prompt="x",
+            output_path=Path("/tmp/out.mp4"),
+            int8_row_fc2=True,
+        )
+        argv = build_h3_argv(h3_bin=Path("/opt/h3"), model_dir=Path("/m"), req=req)
+        self.assertIn("--use-int8-row-fc2", argv)
+        req.ssd_streaming = True
+        argv = build_h3_argv(h3_bin=Path("/opt/h3"), model_dir=Path("/m"), req=req)
+        self.assertNotIn("--use-int8-row-fc2", argv)
+        self.assertIn("--ssd-streaming", argv)
+
     def test_256_preview_disables_token_reduction(self) -> None:
         req = GenerateRequest(
             prompt="x",

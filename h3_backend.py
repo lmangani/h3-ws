@@ -68,7 +68,7 @@ QUALITY_PRESETS: dict[str, dict[str, Any]] = {
         "reuse": 2,
         "core_reuse": None,
         "token_reduction": True,
-        "render": None,
+        "render": (384, 384),  # only applied when output is 512×512
     },
     "balanced": {
         "id": "balanced",
@@ -175,10 +175,36 @@ def ram_gb() -> float | None:
 
 
 def recommend_ssd_streaming(ram: float | None = None) -> bool:
+    """True when RAM is tight. Do not auto-enable: SSD streaming is much slower."""
     gb = ram if ram is not None else ram_gb()
     if gb is None:
         return False
     return gb < 64.0
+
+
+def apple_chip_brand() -> str:
+    if sys.platform != "darwin":
+        return ""
+    try:
+        return subprocess.check_output(
+            ["sysctl", "-n", "machdep.cpu.brand_string"], text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def metal4_gpu(brand: str | None = None) -> bool:
+    """h3.c ``--use-int8-row-fc2`` requires an M5-class Metal 4 GPU."""
+    text = brand if brand is not None else apple_chip_brand()
+    return bool(re.search(r"\bM(?:5|6|7)\b", text))
+
+
+def resolve_int8_row_fc2(req: "GenerateRequest", *, metal4: bool) -> bool:
+    if req.ssd_streaming:
+        return False
+    if req.int8_row_fc2 is not None:
+        return bool(req.int8_row_fc2)
+    return bool(metal4)
 
 
 def fl2va_dir(model_dir: Path) -> Path:
@@ -434,6 +460,7 @@ class GenerateRequest:
     render_height: int | None = None
     seed: int | None = None
     ssd_streaming: bool = False
+    int8_row_fc2: bool | None = None
     first_frame: Path | None = None
     last_frame: Path | None = None
     refs: list[RefItem] = field(default_factory=list)
@@ -508,6 +535,8 @@ def build_h3_argv(
         cmd.extend(["--seed", str(int(req.seed))])
     if req.ssd_streaming:
         cmd.append("--ssd-streaming")
+    elif req.int8_row_fc2:
+        cmd.append("--use-int8-row-fc2")
     if req.profile:
         cmd.append("--profile")
     if req.first_frame:
@@ -531,8 +560,9 @@ class H3Engine:
         self.h3_bin = Path(h3_bin) if h3_bin else default_h3_bin()
         self.model_dir = Path(model_dir) if model_dir else default_model_dir()
         if default_ssd_streaming is None:
-            default_ssd_streaming = recommend_ssd_streaming()
+            default_ssd_streaming = False
         self.default_ssd_streaming = bool(default_ssd_streaming)
+        self.metal4 = metal4_gpu()
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
         self._cancel = threading.Event()
@@ -613,7 +643,8 @@ class H3Engine:
             "h3_bin": str(self.h3_bin),
             "model_dir": str(self.model_dir),
             "ram_gb": ram_gb(),
-            "recommend_ssd_streaming": self.default_ssd_streaming,
+            "recommend_ssd_streaming": recommend_ssd_streaming(),
+            "metal4": self.metal4,
             "warm_session": bool(self._session and getattr(self._session, "alive", False)),
         }
 
@@ -669,6 +700,7 @@ class H3Engine:
 
         req.output_path = Path(req.output_path)
         req.output_path.parent.mkdir(parents=True, exist_ok=True)
+        req.int8_row_fc2 = resolve_int8_row_fc2(req, metal4=self.metal4)
 
         if need_ref:
             self._stop_session()
