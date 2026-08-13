@@ -776,6 +776,7 @@ class H3Engine:
             )
             log.info("h3 session argv: %s", " ".join(argv[:8]) + " …")
             env = h3_media_env()
+            log.info("h3 muxer: %s", env.get("H3_FFMPEG") or env.get("H3_AV"))
             if req.profile:
                 env["H3_PROFILE"] = "1"
             session = H3InteractiveSession(cancel=self._cancel)
@@ -817,6 +818,7 @@ class H3Engine:
             on_progress(self._progress)
 
         env = h3_media_env()
+        log.info("h3 muxer: %s", env.get("H3_FFMPEG") or env.get("H3_AV"))
         try:
             with self._lock:
                 proc = subprocess.Popen(

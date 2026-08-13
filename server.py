@@ -52,7 +52,7 @@ from h3_backend import (  # noqa: E402
     ram_gb,
 )
 from h3_media import require_ui_canvas, snap_frames  # noqa: E402
-from h3_paths import REPO_ROOT, debug_console, default_h3_bin, default_model_dir  # noqa: E402
+from h3_paths import REPO_ROOT, debug_console, default_h3_bin, default_model_dir, real_ffmpeg  # noqa: E402
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8765
@@ -467,6 +467,8 @@ def main() -> None:
         print(f"  RAM      : ~{gb:.0f} GB unified" + ("  (SSD streaming on — slower denoise)" if ssd else ""))
     if engine.metal4:
         print("  GPU      : Metal 4 — --use-int8-row-fc2 on")
+    mux = real_ffmpeg()
+    print(f"  Muxer    : {mux or 'h3-av (PyAV shim)'}")
     print(f"  Endpoint : {ws_url}")
     if args.web_ui:
         print(f"  Web UI   : {http_url}")

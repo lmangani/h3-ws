@@ -195,7 +195,7 @@ class H3AvShimTests(unittest.TestCase):
 
     def test_real_ffmpeg_skips_shim_bindir(self) -> None:
         from h3_av import real_ffmpeg
-        from h3_paths import ffmpeg_shim_bindir
+        from h3_paths import ffmpeg_shim_bindir, h3_media_env
 
         bindir = ffmpeg_shim_bindir()
         found = real_ffmpeg()
@@ -205,8 +205,20 @@ class H3AvShimTests(unittest.TestCase):
         os.environ["H3_AV_FORCE_PYAV"] = "1"
         try:
             self.assertIsNone(real_ffmpeg())
+            env = h3_media_env({})
+            self.assertTrue(str(env.get("H3_AV") or "").endswith("h3-av"))
         finally:
             os.environ.pop("H3_AV_FORCE_PYAV", None)
+
+    def test_media_env_uses_system_ffmpeg_without_h3_av(self) -> None:
+        from h3_paths import h3_media_env, real_ffmpeg
+
+        found = real_ffmpeg()
+        if not found:
+            self.skipTest("no system ffmpeg")
+        env = h3_media_env({})
+        self.assertNotIn("H3_AV", env)
+        self.assertEqual(env["H3_FFMPEG"], found)
 
     def test_media_shim_ok(self) -> None:
         from h3_media import media_shim_ok
