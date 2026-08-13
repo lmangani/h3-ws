@@ -21,7 +21,7 @@ from h3_media import (
     require_ui_canvas,
     snap_frames,
 )
-from h3_paths import default_h3_bin, default_model_dir, h3_media_env, mk_scratch_file
+from h3_paths import default_h3_bin, default_model_dir, h3_media_env, h3_process_cwd, mk_scratch_file
 
 log = logging.getLogger("h3-backend")
 
@@ -536,6 +536,7 @@ class H3Engine:
                 text=True,
                 timeout=60,
                 env=h3_media_env(),
+                cwd=str(h3_process_cwd(self.h3_bin)),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return {"ok": False, "error": str(exc), "h3_bin": str(self.h3_bin)}
@@ -675,7 +676,7 @@ class H3Engine:
             if req.profile:
                 env["H3_PROFILE"] = "1"
             session = H3InteractiveSession(cancel=self._cancel)
-            session.start(argv, env=env)
+            session.start(argv, env=env, cwd=h3_process_cwd(self.h3_bin))
             self._session = session
         session.apply_request(req)
         produced = session.generate(req.prompt, on_progress=_on_progress)
@@ -721,6 +722,7 @@ class H3Engine:
                     text=True,
                     bufsize=1,
                     env=env,
+                    cwd=str(h3_process_cwd(self.h3_bin)),
                 )
                 self._proc = proc
         except OSError as exc:

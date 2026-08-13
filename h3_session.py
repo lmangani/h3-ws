@@ -217,6 +217,7 @@ class H3InteractiveSession:
         argv: list[str],
         *,
         env: dict[str, str] | None = None,
+        cwd: Path | str | None = None,
         timeout_s: float = SESSION_START_TIMEOUT_S,
     ) -> None:
         master, slave = pty.openpty()
@@ -229,6 +230,7 @@ class H3InteractiveSession:
         if env:
             run_env.update(env)
         run_env.setdefault("TERM", "xterm-256color")
+        workdir = str(cwd) if cwd is not None else str(Path(argv[0]).resolve().parent)
         try:
             proc = subprocess.Popen(
                 argv,
@@ -237,6 +239,7 @@ class H3InteractiveSession:
                 stderr=slave,
                 close_fds=True,
                 env=run_env,
+                cwd=workdir,
             )
         except OSError as exc:
             os.close(master)

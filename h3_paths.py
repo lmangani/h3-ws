@@ -50,6 +50,12 @@ def default_h3_bin() -> Path:
     return REPO_ROOT / "third_party" / "h3.c" / "h3"
 
 
+def h3_process_cwd(h3_bin: Path | str | None = None) -> Path:
+    """h3.c opens ``h3_shaders.metal`` from the process working directory."""
+    binary = Path(h3_bin) if h3_bin is not None else default_h3_bin()
+    return binary.expanduser().resolve().parent
+
+
 def default_model_dir() -> Path:
     env = os.environ.get("H3_MODEL_DIR", "").strip() or os.environ.get(
         "H3_WS_MODEL_DIR", ""

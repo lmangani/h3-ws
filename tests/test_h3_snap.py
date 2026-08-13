@@ -273,6 +273,11 @@ class SessionCommandTests(unittest.TestCase):
         self.assertTrue(has_repl_prompt("h3> "))
         self.assertFalse(has_repl_prompt("h3> !size 512x512"))
 
+    def test_h3_process_cwd_is_binary_dir(self) -> None:
+        from h3_paths import h3_process_cwd
+
+        self.assertEqual(h3_process_cwd(Path("/opt/h3.c/h3")), Path("/opt/h3.c"))
+
 
 class ModelLayoutTests(unittest.TestCase):
     def test_empty_fl2va_dir_is_incomplete(self) -> None:
