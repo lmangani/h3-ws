@@ -24,14 +24,9 @@ if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
 fi
 PY="$ROOT/.venv/bin/python"
 
-if ! "$PY" -c "import fastapi, uvicorn, av, PIL, huggingface_hub, websockets" 2>/dev/null; then
-  say "Installing Python packages…"
-  if command -v uv >/dev/null 2>&1; then
-    uv pip install --python "$PY" -r "$ROOT/requirements.txt" || die "pip install failed"
-  else
-    "$PY" -m pip install -r "$ROOT/requirements.txt" || die "pip install failed"
-  fi
-fi
+say "Checking Python packages…"
+"$PY" -c "from h3_bootstrap import ensure_python_requirements; ensure_python_requirements()" \
+  || die "Python packages failed (see requirements.txt)"
 
 if [[ ! -x "$ROOT/third_party/h3.c/h3" ]]; then
   say "h3 binary missing — building (needs submodule + Xcode CLT)…"

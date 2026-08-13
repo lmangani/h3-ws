@@ -21,7 +21,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from starlette.requests import Request
+from h3_bootstrap import ensure_python_requirements
+
+ensure_python_requirements()
+from starlette.requests import Request  # noqa: E402
 
 from h3_backend import (
     GENERATION_MODES,
@@ -824,17 +827,7 @@ async def _worker_loop(state: AppState) -> None:
 
 
 def _ensure_web_deps() -> None:
-    for pkg, mod in (
-        ("fastapi", "fastapi"),
-        ("uvicorn", "uvicorn"),
-        ("python-multipart", "multipart"),
-        ("starlette", "starlette"),
-    ):
-        try:
-            __import__(mod)
-        except ImportError:
-            log.info("Installing %s…", pkg)
-            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
+    ensure_python_requirements()
 
 
 def create_app(

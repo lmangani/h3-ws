@@ -287,7 +287,10 @@ def main() -> None:
     try:
         from huggingface_hub import HfApi, snapshot_download
     except ImportError:
-        raise SystemExit("huggingface_hub is required: pip install huggingface_hub") from None
+        from h3_bootstrap import ensure_python_requirements
+
+        ensure_python_requirements()
+        from huggingface_hub import HfApi, snapshot_download
 
     dest.mkdir(parents=True, exist_ok=True)
     reused = reuse_existing_layout(dest)

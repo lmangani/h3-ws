@@ -26,22 +26,10 @@ from typing import Any
 
 NotifyJson = Callable[..., Awaitable[None]]
 
+from h3_bootstrap import ensure_python_requirements
 
-def _ensure(pkg: str, import_as: str | None = None):
-    import importlib
-    import subprocess
-
-    name = import_as or pkg
-    try:
-        return __import__(name)
-    except ImportError:
-        print(f"  '{pkg}' not found — installing…", flush=True)
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
-        importlib.invalidate_caches()
-        return __import__(name)
-
-
-websockets = _ensure("websockets")
+ensure_python_requirements()
+import websockets  # noqa: E402
 
 from h3_backend import (  # noqa: E402
     QUALITY_PRESETS,
