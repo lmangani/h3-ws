@@ -64,6 +64,6 @@ First/last-frame anchors cannot be mixed with Ref2VA references. For references,
 
 **Quality:** Four-step · Aggressive · Fast · Balanced (default) · Close.
 
-**Canvas** (dropdown only): 256×256 preview, 512×512 (safest), 512×512 with 384 or 320 internal, 768×768, 1024×768, 768×1024, 1344×768, 768×1344. H3-Base is a 768p model; 512×512 is the usual working size.
+**Canvas** (dropdown, grouped): **1:1** 256×256 preview, 512×512 (safest), 512×512 with 384 or 320 internal, 768×768. **16:9** 1024×576 (exact) and 1248×704 (largest under the cap). **7:4** 1344×768 max landscape. **4:3** 1024×768. **5:4** 960×768. **4:5** 768×960 Instagram/social. **3:4** 768×1024. **9:16** 576×1024 (exact Stories/Reels/TikTok) and 704×1248 (largest). **4:7** 768×1344 max portrait. Each side is a multiple of 32; pixel count cannot exceed 768×1344. True 768p 16:9 (1365×768) does not fit that cap. H3-Base is a 768p model; 512×512 is the usual working size.
 
 Output is 24 fps video with 32 kHz stereo audio. Duration snaps up to a legal H3 length (about 0.9 s, 1.6 s, 2.3 s, 4.5 s, 10 s, 15 s).

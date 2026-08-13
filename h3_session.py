@@ -48,6 +48,14 @@ def strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
+def normalize_pty(text: str) -> str:
+    return strip_ansi(text).replace("\r", "\n")
+
+
+def has_repl_prompt(text: str) -> bool:
+    return bool(_PROMPT_RE.search(normalize_pty(text)))
+
+
 def parse_done_path(text: str) -> Path | None:
     match = _DONE_RE.search(strip_ansi(text))
     if not match:
@@ -238,7 +246,7 @@ class H3InteractiveSession:
         self._master = master
         self._proc = proc
         try:
-            boot = self._read_until(lambda buf: bool(_PROMPT_RE.search(strip_ansi(buf))), timeout_s)
+            boot = self._read_until(has_repl_prompt, timeout_s)
         except Exception:
             self.stop()
             raise
@@ -249,7 +257,7 @@ class H3InteractiveSession:
     def apply_request(self, req: GenerateRequest, timeout_s: float = 60.0) -> None:
         for cmd in session_commands_for_request(req):
             self._send_line(cmd)
-            self._read_until(lambda buf: bool(_PROMPT_RE.search(strip_ansi(buf))), timeout_s)
+            self._read_until(has_repl_prompt, timeout_s)
 
     def generate(
         self,
@@ -265,7 +273,7 @@ class H3InteractiveSession:
         collected: list[str] = []
 
         def ready(buf: str) -> bool:
-            text = strip_ansi(buf)
+            text = normalize_pty(buf)
             return bool(_DONE_RE.search(text) and _PROMPT_RE.search(text)) or bool(
                 _ERROR_RE.search(text) and _PROMPT_RE.search(text) and "unknown command" not in text
             )
@@ -318,7 +326,7 @@ class H3InteractiveSession:
         if self._master is None or self._proc is None or self._proc.poll() is not None:
             self.alive = False
             raise SessionError("interactive h3 is not running")
-        payload = (line.rstrip("\n") + "\n").encode("utf-8")
+        payload = (line.rstrip("\r\n") + "\r").encode("utf-8")
         try:
             os.write(self._master, payload)
         except OSError as exc:
@@ -359,7 +367,11 @@ class H3InteractiveSession:
                 on_chunk(chunk)
             if predicate(buf):
                 return buf
-        raise SessionError(f"timed out after {timeout_s:.0f}s waiting for h3")
+        snippet = normalize_pty(buf).strip()[-500:]
+        raise SessionError(
+            f"timed out after {timeout_s:.0f}s waiting for h3"
+            + (f": {snippet!r}" if snippet else "")
+        )
 
 
 def copy_session_output(src: Path, dest: Path) -> Path:

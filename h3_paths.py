@@ -66,6 +66,27 @@ def default_h3_av() -> Path:
     return REPO_ROOT / "scripts" / "h3-av"
 
 
+def ffmpeg_shim_bindir() -> Path:
+    """Directory with ``ffmpeg`` / ``ffprobe`` names pointing at h3-av.
+
+    Unpatched h3.c looks up those names on PATH. Patched builds prefer H3_AV.
+    """
+    bindir = REPO_ROOT / "scripts" / ".h3-av-bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    shim = default_h3_av().resolve()
+    for name in ("ffmpeg", "ffprobe"):
+        link = bindir / name
+        try:
+            if link.is_symlink() and link.resolve() == shim:
+                continue
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            link.symlink_to(shim)
+        except OSError:
+            continue
+    return bindir
+
+
 def h3_media_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Force h3.c to posix_spawn the PyAV shim instead of system ffmpeg."""
     import sys
@@ -76,4 +97,6 @@ def h3_media_env(base: dict[str, str] | None = None) -> dict[str, str]:
     env["H3_FFMPEG"] = shim
     env["H3_FFPROBE"] = shim
     env["H3_PYTHON"] = sys.executable
+    bindir = str(ffmpeg_shim_bindir())
+    env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
     return env

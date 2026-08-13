@@ -13,6 +13,8 @@ export interface PresetOption {
   seconds?: number;
   num_frames?: number;
   guidance?: string;
+  aspect?: string;
+  group?: string;
 }
 
 export interface Config {

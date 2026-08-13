@@ -29,6 +29,9 @@ models/
 web/node_modules/
 web/dist/
 
+# Runtime ffmpeg/ffprobe names for the PyAV shim
+scripts/.h3-av-bin/
+
 # h3.c build artifacts (submodule still tracked)
 third_party/h3.c/h3
 third_party/h3.c/*.o

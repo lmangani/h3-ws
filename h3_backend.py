@@ -133,6 +133,10 @@ def ref2va_dir(model_dir: Path) -> Path:
     return model_dir / "Ref2VA"
 
 
+def _has_safetensors(directory: Path) -> bool:
+    return directory.is_dir() and any(directory.glob("*.safetensors"))
+
+
 def model_layout_ok(model_dir: Path, *, need_ref2va: bool = False) -> tuple[bool, str]:
     root = Path(model_dir)
     if not root.is_dir():
@@ -140,8 +144,27 @@ def model_layout_ok(model_dir: Path, *, need_ref2va: bool = False) -> tuple[bool
     fl = fl2va_dir(root)
     if not fl.is_dir():
         return False, f"FL2VA checkpoint missing under {root}"
-    if need_ref2va and not ref2va_dir(root).is_dir():
-        return False, f"Ref2VA checkpoint missing under {root}"
+    required = (
+        fl / "transformer" / "config.json",
+        fl / "transformer" / "model.safetensors.index.json",
+        fl / "tokenizer" / "tokenizer.json",
+        fl / "text_encoder" / "model.safetensors.index.json",
+    )
+    for path in required:
+        if not path.is_file():
+            return False, f"incomplete FL2VA checkpoint: missing {path}"
+    if not _has_safetensors(fl / "transformer"):
+        return False, f"incomplete FL2VA transformer shards under {fl / 'transformer'}"
+    if not _has_safetensors(fl / "text_encoder"):
+        return False, f"incomplete FL2VA text encoder under {fl / 'text_encoder'}"
+    if not _has_safetensors(fl / "video_vae" / "source"):
+        return False, f"incomplete FL2VA video VAE under {fl / 'video_vae' / 'source'}"
+    if not _has_safetensors(fl / "audio_vae"):
+        return False, f"incomplete FL2VA audio VAE under {fl / 'audio_vae'}"
+    if need_ref2va:
+        rf = ref2va_dir(root)
+        if not _has_safetensors(rf / "transformer"):
+            return False, f"Ref2VA transformer missing under {rf / 'transformer'}"
     return True, str(root)
 
 
@@ -704,6 +727,7 @@ class H3Engine:
             raise RuntimeError(f"failed to spawn h3: {exc}") from exc
 
         assert proc.stdout is not None
+        tail: list[str] = []
         try:
             for line in proc.stdout:
                 if self._cancel.is_set():
@@ -712,7 +736,12 @@ class H3Engine:
                 self._parse_line(line, int(q["steps"]))
                 if on_progress:
                     on_progress(self._progress)
-                log.debug("h3: %s", line.rstrip())
+                stripped = line.rstrip()
+                if stripped:
+                    tail.append(stripped)
+                    if len(tail) > 80:
+                        del tail[:-80]
+                log.info("h3: %s", stripped)
             rc = proc.wait()
         finally:
             self._proc = None
@@ -720,7 +749,8 @@ class H3Engine:
         if self._cancel.is_set():
             raise GenerationCancelledError("cancelled")
         if rc != 0:
-            raise RuntimeError(f"h3 exited {rc}")
+            detail = "\n".join(tail[-40:]) if tail else "(h3 printed nothing)"
+            raise RuntimeError(f"h3 exited {rc}\n{detail}")
         if not req.output_path.is_file() or req.output_path.stat().st_size < 32:
             raise RuntimeError(f"h3 did not write an MP4 at {req.output_path}")
         return str(req.output_path)

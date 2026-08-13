@@ -3,7 +3,23 @@ import { clipDisplayPrompt, snapshotFromClip } from "./clipEditor";
 import { applyProgressEvent } from "./progress";
 import { captureVideoFrame, formatVideoTime } from "./frameCapture";
 import { RefList, refsAreValid } from "./RefList";
-import type { Clip, Config, LibraryFrame, ProgressState, ReferenceItem } from "./types";
+import type { Clip, Config, LibraryFrame, PresetOption, ProgressState, ReferenceItem } from "./types";
+
+function resolutionGroups(presets: PresetOption[]): { group: string; items: PresetOption[] }[] {
+  const order: { group: string; items: PresetOption[] }[] = [];
+  const index = new Map<string, number>();
+  for (const preset of presets) {
+    const group = preset.group || "";
+    let slot = index.get(group);
+    if (slot === undefined) {
+      slot = order.length;
+      index.set(group, slot);
+      order.push({ group, items: [] });
+    }
+    order[slot].items.push(preset);
+  }
+  return order;
+}
 
 const API = "";
 const BLOB_VIDEO_PREFIX = "blob:";
@@ -166,7 +182,7 @@ export default function App() {
   const [seed, setSeed] = useState("");
   const [ssdStreaming, setSsdStreaming] = useState(false);
   const [tokenReduction, setTokenReduction] = useState(false);
-  const [showOptions, setShowOptions] = useState(false);
+  const [showOptions, setShowOptions] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
@@ -329,35 +345,34 @@ export default function App() {
 
   function handleRefsChange(next: ReferenceItem[]) {
     setRefs(next);
-    if (next.length > 0) {
-      setMode("ref2va");
-      setImagePath(null);
-      setImageName(null);
-      setEndImagePath(null);
-      setEndImageName(null);
-      setClipMultiplier(1);
-    } else if (mode === "ref2va") {
-      setMode("t2va");
-    }
+    if (next.length === 0) return;
+    setMode("ref2va");
+    setImagePath(null);
+    setImageName(null);
+    setEndImagePath(null);
+    setEndImageName(null);
+    setClipMultiplier(1);
   }
 
   function applyFrameAsInput(frame: LibraryFrame, which: "start" | "end") {
-    if (IMAGE_MODES.has(mode) || END_IMAGE_MODES.has(mode)) {
-      setRefs([]);
-      if (which === "end") {
-        setEndImagePath(frame.path);
-        setEndImageName(frame.label);
-      } else {
-        setImagePath(frame.path);
-        setImageName(frame.label);
-      }
+    if (mode === "ref2va") {
+      if (refs.some((r) => r.path === frame.path)) return;
+      handleRefsChange([
+        ...refs,
+        { id: crypto.randomUUID(), kind: "image", path: frame.path, name: frame.label },
+      ]);
       return;
     }
-    if (refs.some((r) => r.path === frame.path)) return;
-    handleRefsChange([
-      ...refs,
-      { id: crypto.randomUUID(), kind: "image", path: frame.path, name: frame.label },
-    ]);
+    setRefs([]);
+    if (which === "end") {
+      setEndImagePath(frame.path);
+      setEndImageName(frame.label);
+      if (mode === "t2va" || mode === "first_frame") setMode("fl2va");
+      return;
+    }
+    setImagePath(frame.path);
+    setImageName(frame.label);
+    if (mode === "t2va") setMode("first_frame");
   }
 
   async function deleteFrame(frame: LibraryFrame) {
@@ -664,15 +679,6 @@ export default function App() {
               </button>
             </div>
 
-            <RefList
-              refs={refs}
-              disabled={busy}
-              frames={frameLibrary}
-              clips={libraryClips}
-              onChange={handleRefsChange}
-              uploadFile={uploadFile}
-            />
-
             <button type="button" className="options-toggle" onClick={() => setShowOptions((v) => !v)}>
               {showOptions ? "Hide options" : "Show options"}
             </button>
@@ -688,7 +694,7 @@ export default function App() {
                   <label className="opt-mode">
                     Mode
                     <select
-                      value={isRef2va ? "ref2va" : mode}
+                      value={mode}
                       onChange={(e) => {
                         const next = e.target.value;
                         setMode(next);
@@ -739,11 +745,23 @@ export default function App() {
                         }
                       }}
                     >
-                      {config.resolution_presets.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.label}
-                        </option>
-                      ))}
+                      {resolutionGroups(config.resolution_presets).map((g) =>
+                        g.group ? (
+                          <optgroup key={g.group} label={g.group}>
+                            {g.items.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : (
+                          g.items.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.label}
+                            </option>
+                          ))
+                        ),
+                      )}
                     </select>
                   </label>
                   <label className="opt-narrow">
@@ -815,7 +833,13 @@ export default function App() {
 
                 {(needsFirst || needsLast || lastUsesPrimaryUpload) && (
                   <div className="options-uploads">
-                    <span className="media-panel-title">Conditioning images</span>
+                    <span className="media-panel-title">
+                      {mode === "fl2va"
+                        ? "First and last frames"
+                        : mode === "last_frame"
+                          ? "Last frame"
+                          : "First frame"}
+                    </span>
                     {(needsFirst || lastUsesPrimaryUpload) && (
                       <label className="media-upload">
                         <span className="media-upload-label">
@@ -857,11 +881,15 @@ export default function App() {
                   </div>
                 )}
 
-                {isRef2va && (
-                  <p className="hint">
-                    Ref2VA uses the distinct checkpoint. Prompt with Picture N / Video N / Audio N in list
-                    order. First/last-frame anchors are disabled for this run.
-                  </p>
+                {mode === "ref2va" && (
+                  <RefList
+                    refs={refs}
+                    disabled={busy}
+                    frames={frameLibrary}
+                    clips={libraryClips}
+                    onChange={handleRefsChange}
+                    uploadFile={uploadFile}
+                  />
                 )}
 
                 {isMultiClip && (
@@ -928,8 +956,8 @@ export default function App() {
             </div>
             {frameLibrary.length === 0 ? (
               <p className="library-empty-hint">
-                Pause a video and tap the camera icon to capture stills for first/last-frame or Ref2VA
-                image references.
+                Pause a video and tap the camera icon to capture stills. Use them as a
+                first or last frame, or as a reference image when that mode is selected.
               </p>
             ) : (
               <div className="frame-library-grid">

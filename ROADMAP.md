@@ -27,11 +27,11 @@ Upstream: [antirez/h3.c](https://github.com/antirez/h3.c) (`h3-metal`). Weights:
 | Constraint | Rule |
 |------------|------|
 | Output | Joint **video + 32 kHz stereo audio**, 24 fps |
-| Canvas | Width and height multiples of **32**; product ≤ **768×1344** |
+| Canvas | Width and height multiples of **32**; product ≤ **768×1344** (so exact 768p 16:9 / 9:16 do not fit) |
 | Temporal shape | Frames snap **up** to `5 + 17n` (22, 39, 56, 107, 243, 362, …) |
 | Checkpoints | **FL2VA** (text / first / last frame) and **Ref2VA** (ordered image/video/audio refs) are **distinct** and **must not mix** in one run |
 | Memory | ~33 GB transformer; ~40 GB peak physical on M5 Max full-residency; `--ssd-streaming` drops tracked DiT storage to ~2 GiB |
-| Validated sizes | `512×512` (dev), `768×768`, `1344×768` / `768×1344`, `1024×768` / `768×1024`; `256×256` is a fast preview only |
+| Validated sizes | `512×512` (dev), `768×768`, `1344×768` / `768×1344`, `1024×768` / `768×1024`; `256×256` is a fast preview only. UI also offers snapped 16:9 / 9:16 / 4:5 / 5:4 under the same cap. |
 | Hardware | Built for M3 Max / M5 Max; int8 MLP + TensorOps are M5 defaults |
 
 `--steps` is always the number of denoising **passes**. `--reuse` and `--core-reuse` are mutually exclusive. `--seconds` and `--frames` are mutually exclusive.
@@ -112,11 +112,14 @@ Advanced (collapsed, not on the first row): `--core-reuse` (exclusive with reuse
 
 | Canvas | Role |
 |--------|------|
-| 256×256 | Fast composition preview (auto RoPE adapt; no token-reduction) |
-| 512×512 | Default / safest |
-| 768×768 | Square 768p |
-| 1024×768 / 768×1024 | 4:3 / 3:4 |
-| 1344×768 / 768×1344 | Landscape / portrait 768p limit |
+| 256×256 | 1:1 fast preview (auto RoPE adapt; no token-reduction) |
+| 512×512 | 1:1 default / safest |
+| 768×768 | 1:1 square 768p |
+| 1024×576 / 576×1024 | Exact 16:9 / 9:16 (largest exact under the cap) |
+| 1248×704 / 704×1248 | Largest near-16:9 / 9:16 under the cap |
+| 1024×768 / 768×1024 | Exact 4:3 / 3:4 |
+| 960×768 / 768×960 | Exact 5:4 / 4:5 social (Instagram feed) |
+| 1344×768 / 768×1344 | 7:4 / 4:7 pixel-cap extremes (not 16:9 / 9:16) |
 
 ### Duration presets (`5 + 17n` @ 24 fps)
 

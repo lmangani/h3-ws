@@ -3,6 +3,8 @@ from pathlib import Path
 
 from h3_backend import GenerateRequest, RefItem, build_h3_argv, expand_quality
 from h3_media import (
+    MAX_PIXELS,
+    RESOLUTION_PRESETS,
     require_ui_canvas,
     seconds_to_frames,
     snap_frames,
@@ -39,10 +41,50 @@ class SnapTests(unittest.TestCase):
         self.assertEqual(require_ui_canvas(512, 512), (512, 512))
         self.assertEqual(require_ui_canvas(256, 256), (256, 256))
         self.assertEqual(require_ui_canvas(1344, 768), (1344, 768))
+        self.assertEqual(require_ui_canvas(1024, 576), (1024, 576))
+        self.assertEqual(require_ui_canvas(576, 1024), (576, 1024))
+        self.assertEqual(require_ui_canvas(768, 960), (768, 960))
         with self.assertRaises(ValueError):
             require_ui_canvas(640, 640)
         with self.assertRaises(ValueError):
             require_ui_canvas(1024, 1024)
+
+
+class ResolutionPresetTests(unittest.TestCase):
+    def test_every_preset_obeys_h3_spatial_rules(self) -> None:
+        seen: set[str] = set()
+        for preset in RESOLUTION_PRESETS:
+            w, h = int(preset["width"]), int(preset["height"])
+            self.assertEqual(w % 32, 0, preset["id"])
+            self.assertEqual(h % 32, 0, preset["id"])
+            self.assertGreaterEqual(w, 32)
+            self.assertGreaterEqual(h, 32)
+            self.assertLessEqual(w * h, MAX_PIXELS, preset["id"])
+            self.assertEqual(require_ui_canvas(w, h), (w, h))
+            self.assertNotIn(preset["id"], seen)
+            seen.add(str(preset["id"]))
+
+    def test_social_aspects_are_exact_or_tagged(self) -> None:
+        from math import gcd
+
+        def ratio(w: int, h: int) -> tuple[int, int]:
+            g = gcd(w, h)
+            return w // g, h // g
+
+        by_id = {p["id"]: p for p in RESOLUTION_PRESETS}
+        self.assertEqual(ratio(by_id["1024x576"]["width"], by_id["1024x576"]["height"]), (16, 9))
+        self.assertEqual(ratio(by_id["576x1024"]["width"], by_id["576x1024"]["height"]), (9, 16))
+        self.assertEqual(ratio(by_id["768x960"]["width"], by_id["768x960"]["height"]), (4, 5))
+        self.assertEqual(ratio(by_id["960x768"]["width"], by_id["960x768"]["height"]), (5, 4))
+        self.assertEqual(ratio(by_id["1024x768"]["width"], by_id["1024x768"]["height"]), (4, 3))
+        self.assertEqual(ratio(by_id["768x1024"]["width"], by_id["768x1024"]["height"]), (3, 4))
+        self.assertEqual(ratio(by_id["1344x768"]["width"], by_id["1344x768"]["height"]), (7, 4))
+        self.assertEqual(ratio(by_id["768x1344"]["width"], by_id["768x1344"]["height"]), (4, 7))
+        self.assertEqual(by_id["1024x576"]["aspect"], "16:9")
+        self.assertEqual(by_id["576x1024"]["aspect"], "9:16")
+        self.assertEqual(by_id["768x960"]["aspect"], "4:5")
+        self.assertEqual(by_id["1344x768"]["aspect"], "7:4")
+        self.assertEqual(by_id["768x1344"]["aspect"], "4:7")
 
 
 class QualityTests(unittest.TestCase):
@@ -223,6 +265,27 @@ class SessionCommandTests(unittest.TestCase):
         assert progress is not None
         self.assertEqual(progress["step"], 4)
         self.assertEqual(progress["total"], 20)
+
+    def test_repl_prompt_detects_linenoise_cr(self) -> None:
+        from h3_session import has_repl_prompt
+
+        self.assertTrue(has_repl_prompt("Size: 512x512\r\nh3> "))
+        self.assertTrue(has_repl_prompt("h3> "))
+        self.assertFalse(has_repl_prompt("h3> !size 512x512"))
+
+
+class ModelLayoutTests(unittest.TestCase):
+    def test_empty_fl2va_dir_is_incomplete(self) -> None:
+        import tempfile
+
+        from h3_backend import model_layout_ok
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            (dest / "FL2VA").mkdir()
+            ok, note = model_layout_ok(dest)
+            self.assertFalse(ok)
+            self.assertIn("incomplete", note)
 
 
 if __name__ == "__main__":

@@ -96,13 +96,13 @@ export function RefList({ refs, disabled, frames, clips, onChange, uploadFile }:
   return (
     <div className="ref-panel">
       <div className="ref-panel-header">
-        <span className="media-panel-title">References (Ref2VA)</span>
-        <span className="ref-panel-count">{refs.length}</span>
+        <span className="media-panel-title">Reference clips</span>
+        {refs.length > 0 && <span className="ref-panel-count">{refs.length}</span>}
       </div>
       <p className="hint hint-inline">
-        Order is the model order. Prompt with{" "}
-        <code>Picture 1</code>, <code>Video 1</code>. Cannot mix with first/last-frame
-        anchors. Audio is 2–15 s, ≤3 clips, total ≤15 s.
+        Add image, video, or audio files in the order they should appear. In the prompt,
+        name them <code>Picture 1</code>, <code>Video 1</code>, <code>Audio 1</code>.
+        Audio clips must be 2–15 s (max 3, 15 s total) and need an image or video too.
       </p>
 
       {refs.length > 0 && (
@@ -140,13 +140,13 @@ export function RefList({ refs, disabled, frames, clips, onChange, uploadFile }:
 
       <div className="ref-add-row">
         <button type="button" className="btn-secondary btn-compact" disabled={disabled} onClick={() => imageRef.current?.click()}>
-          Image
+          Add image
         </button>
         <button type="button" className="btn-secondary btn-compact" disabled={disabled} onClick={() => silentVideoRef.current?.click()}>
-          Silent video
+          Add silent video
         </button>
         <button type="button" className="btn-secondary btn-compact" disabled={disabled} onClick={() => videoRef.current?.click()}>
-          Video
+          Add video
         </button>
         <button
           type="button"
@@ -154,10 +154,10 @@ export function RefList({ refs, disabled, frames, clips, onChange, uploadFile }:
           disabled={disabled}
           onClick={() => videoAudioVideoRef.current?.click()}
         >
-          Video + audio
+          Add video + audio
         </button>
         <button type="button" className="btn-secondary btn-compact" disabled={disabled} onClick={() => audioRef.current?.click()}>
-          Audio
+          Add audio
         </button>
       </div>
 
