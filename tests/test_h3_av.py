@@ -220,6 +220,24 @@ class H3AvShimTests(unittest.TestCase):
         self.assertNotIn("H3_AV", env)
         self.assertEqual(env["H3_FFMPEG"], found)
 
+    def test_tool_runs_rejects_dyld_crash(self) -> None:
+        from h3_paths import _tool_ok, _tool_runs
+
+        _tool_ok.pop("/usr/bin/false", None)
+        self.assertFalse(_tool_runs("/usr/bin/false"))
+        self.assertFalse(_tool_runs("/no/such/ffmpeg"))
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "ffmpeg"
+            fake.write_text(
+                "#!/bin/sh\n"
+                'echo "dyld[1]: Library not loaded: '
+                '/opt/homebrew/opt/x265/lib/libx265.215.dylib" >&2\n'
+                "exit 1\n"
+            )
+            fake.chmod(0o755)
+            _tool_ok.pop(str(fake), None)
+            self.assertFalse(_tool_runs(str(fake)))
+
     def test_media_shim_ok(self) -> None:
         from h3_media import media_shim_ok
 

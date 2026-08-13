@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -125,12 +127,43 @@ def _force_pyav() -> bool:
 
 
 def real_ffmpeg() -> str | None:
-    """System ffmpeg, never ``scripts/.h3-av-bin`` or the PyAV shim."""
+    """System ffmpeg that actually starts, never the PyAV shim."""
     return _real_tool("ffmpeg")
 
 
 def real_ffprobe() -> str | None:
     return _real_tool("ffprobe")
+
+
+_tool_ok: dict[str, bool] = {}
+
+
+def _tool_runs(path: str) -> bool:
+    """Reject Homebrew binaries that crash on missing dylibs (dyld)."""
+    cached = _tool_ok.get(path)
+    if cached is not None:
+        return cached
+    try:
+        proc = subprocess.run(
+            [path, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _tool_ok[path] = False
+        return False
+    text = f"{proc.stdout or ''}{proc.stderr or ''}"
+    ok = proc.returncode == 0 and "Library not loaded" not in text and "dyld[" not in text
+    if not ok:
+        logging.getLogger("h3").warning(
+            "skipping broken %s (%s)",
+            path,
+            "dyld" if "Library not loaded" in text or "dyld[" in text else f"exit {proc.returncode}",
+        )
+    _tool_ok[path] = ok
+    return ok
 
 
 def _real_tool(name: str) -> str | None:
@@ -152,7 +185,10 @@ def _real_tool(name: str) -> str | None:
             continue
         if _looks_like_media_shim(candidate):
             continue
-        return str(candidate)
+        resolved = str(candidate)
+        if not _tool_runs(resolved):
+            continue
+        return resolved
     return None
 
 
@@ -178,10 +214,12 @@ def ffmpeg_shim_bindir() -> Path:
 
 
 def h3_media_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """h3.c mux/decode: system ffmpeg if present, otherwise the PyAV shim.
+    """h3.c mux/decode: a working system ffmpeg, otherwise the PyAV shim.
 
-    ``H3_AV`` overrides both tools in patched h3.c, so it must be unset when
-    the real binaries are used. A warm session captures this env at spawn.
+    Homebrew binaries that crash on missing dylibs (``Library not loaded``)
+    are skipped. ``H3_AV`` overrides both tools in patched h3.c, so it must
+    be unset when the real binaries are used. A warm session captures this
+    env at spawn — restart the server after muxer changes.
     """
     import sys
 
