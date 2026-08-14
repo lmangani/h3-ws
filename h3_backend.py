@@ -464,6 +464,13 @@ def append_ref_flags(cmd: list[str], refs: list[RefItem]) -> None:
 
 
 @dataclass
+class LoraRef:
+    spec: str
+    path: Path
+    scale: float = 1.0
+
+
+@dataclass
 class GenerateRequest:
     prompt: str
     output_path: Path
@@ -484,6 +491,7 @@ class GenerateRequest:
     first_frame: Path | None = None
     last_frame: Path | None = None
     refs: list[RefItem] = field(default_factory=list)
+    loras: list[LoraRef] = field(default_factory=list)
     mode: str = "t2va"
     profile: bool = True
 
@@ -516,6 +524,8 @@ def build_h3_argv(
         render_width=req.render_width,
         render_height=req.render_height,
     )
+    if req.loras and req.ssd_streaming:
+        raise ValueError("LoRA cannot be combined with --ssd-streaming")
     if req.refs:
         validate_refs(req.refs)
     if uses_ref2va(req) and uses_fl2va_anchors(req):
@@ -557,6 +567,8 @@ def build_h3_argv(
         cmd.append("--ssd-streaming")
     elif req.int8_row_fc2:
         cmd.append("--use-int8-row-fc2")
+    for lora in req.loras:
+        cmd.extend(["--lora", f"{lora.path}:{lora.scale:.4g}"])
     if req.profile:
         cmd.append("--profile")
     if req.first_frame:
@@ -589,6 +601,7 @@ class H3Engine:
         self._progress: dict[str, Any] = {}
         self._t0 = 0.0
         self._session: Any | None = None
+        self._session_lora_key: tuple[tuple[str, float], ...] = ()
         self._eta = ProgressEta()
 
     def model_progress_for_ws(self) -> dict[str, Any] | None:
@@ -741,6 +754,7 @@ class H3Engine:
     def _stop_session(self) -> None:
         session = self._session
         self._session = None
+        self._session_lora_key = ()
         if session is None:
             return
         try:
@@ -788,8 +802,13 @@ class H3Engine:
             if on_progress:
                 on_progress(mp)
 
+        lora_key = tuple((str(item.path), float(item.scale)) for item in req.loras)
         session = self._session
-        if session is None or not getattr(session, "alive", False):
+        if (
+            session is None
+            or not getattr(session, "alive", False)
+            or self._session_lora_key != lora_key
+        ):
             self._stop_session()
             argv = build_session_argv(
                 h3_bin=self.h3_bin, model_dir=self.model_dir, req=req
@@ -797,11 +816,17 @@ class H3Engine:
             log.info("h3 session argv: %s", " ".join(argv[:8]) + " …")
             env = h3_media_env()
             log.info("h3 muxer: %s", env.get("H3_FFMPEG") or env.get("H3_AV"))
+            if req.loras:
+                log.info(
+                    "h3 lora: %s",
+                    ", ".join(f"{item.path.name}@{item.scale}" for item in req.loras),
+                )
             if req.profile:
                 env["H3_PROFILE"] = "1"
             session = H3InteractiveSession(cancel=self._cancel)
             session.start(argv, env=env, cwd=h3_process_cwd(self.h3_bin))
             self._session = session
+            self._session_lora_key = lora_key
         session.apply_request(req)
         produced = session.generate(req.prompt, on_progress=_on_progress)
         copy_session_output(produced, req.output_path)

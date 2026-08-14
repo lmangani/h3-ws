@@ -1,3 +1,16 @@
+export interface LoraPreset {
+  id: string;
+  label: string;
+  spec: string;
+  scale: number;
+  custom?: boolean;
+  cached?: boolean;
+  steps?: number;
+  layers?: number;
+  reuse?: number;
+  guidance?: string | null;
+}
+
 export interface QualityPreset {
   id: string;
   label: string;
@@ -33,6 +46,7 @@ export interface Config {
   recommend_ssd_streaming?: boolean;
   metal4?: boolean;
   quality_presets: QualityPreset[];
+  lora_presets?: LoraPreset[];
   resolution_presets: PresetOption[];
   duration_presets: PresetOption[];
   generation_modes: { id: string; label: string }[];

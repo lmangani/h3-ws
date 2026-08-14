@@ -55,3 +55,7 @@ Do not mix first/last-frame anchors with Ref2VA references. Prompt Ref2VA with `
 h3.c defaults are `--steps 20 --layers 50 --reuse 1`. The UI always lets you edit steps, layers, and reuse (a preset fills them). Close keeps `--steps 50` explicit: 50 complete 50-block denoiser forwards — the oracle when a fast mode changes subject, anatomy, motion, or composition.
 
 `--reuse` and `--core-reuse` are mutually exclusive. Do not combine token-reduction with `--layers 40 --reuse 3`. `--ssd-streaming` saves RAM and makes denoise much slower — leave it off unless the process is killed for memory. On M5, `--use-int8-row-fc2` is on automatically.
+
+## LoRA
+
+The Web UI LoRA menu can download and enable FL2VA DiT adapters. First builtin: [Tutu MiniMax-H3 Audio-Video 20→8 NFE](https://huggingface.co/tutututututu/Tutu-MiniMax-H3-AudioVideo-20to8-NFE-LoRA) (step 100 at strength 0.8, 8 steps). h3.c fuses `W += scale * B @ A` at DiT load (`--lora PATH:SCALE`). Not compatible with `--ssd-streaming`. Rebuild `./h3` after pull so the fuse patch is in the binary.

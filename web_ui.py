@@ -35,6 +35,7 @@ from h3_backend import (
     GenerateRequest,
     GenerationCancelledError,
     H3Engine,
+    LoraRef,
     parse_refs_payload,
     ram_gb,
     recommend_ssd_streaming,
@@ -53,6 +54,14 @@ from h3_media import (
     validate_canvas,
 )
 from h3_paths import REPO_ROOT, configure_scratch_root, mk_scratch_dir
+from h3_lora import (
+    ensure_lora,
+    lora_catalog,
+    normalize_lora_spec,
+    read_custom_loras,
+    write_custom_loras,
+    _label_for_spec,
+)
 
 log = logging.getLogger("h3-web")
 
@@ -101,6 +110,7 @@ class ClipRecord:
     autocontinue: Optional[bool] = None
     autoconcat: Optional[bool] = None
     quality: Optional[str] = None
+    loras: Optional[list[dict[str, Any]]] = None
 
 
 @dataclass
@@ -542,7 +552,21 @@ def _clip_settings_from_body(body: dict[str, Any]) -> dict[str, Any]:
         "quality": str(body.get("quality") or "fast"),
         "render_width": int(body["render_width"]) if body.get("render_width") else None,
         "render_height": int(body["render_height"]) if body.get("render_height") else None,
+        "loras": body.get("loras") or body.get("lora_specs") or [],
     }
+
+
+def _loras_from_body(state: AppState, body: dict[str, Any]) -> list[LoraRef]:
+    from h3_lora import lora_catalog, parse_lora_specs, resolve_lora_path
+
+    specs = parse_lora_specs(
+        body.get("loras") or body.get("lora_specs"),
+        lora_catalog(state.output_dir),
+    )
+    return [
+        LoraRef(spec=spec, path=resolve_lora_path(spec), scale=scale)
+        for spec, scale in specs
+    ]
 
 
 def _resolve_existing_media(state: AppState, raw: str) -> Path:
@@ -576,6 +600,7 @@ def _request_from_body(
     prompt: str,
     output: Path,
     *,
+    state: AppState | None = None,
     first_frame: Path | None = None,
     last_frame: Path | None = None,
 ) -> GenerateRequest:
@@ -604,6 +629,7 @@ def _request_from_body(
         raise ValueError("ref2va requires at least one image, video, or audio reference")
     rw = settings.get("render_width")
     rh = settings.get("render_height")
+    loras = _loras_from_body(state, body) if state is not None else []
     return GenerateRequest(
         prompt=prompt,
         output_path=output,
@@ -621,10 +647,11 @@ def _request_from_body(
         render_width=int(rw) if rw else None,
         render_height=int(rh) if rh else None,
         seed=settings.get("seed"),
-        ssd_streaming=bool(body.get("ssd_streaming")),
+        ssd_streaming=bool(body.get("ssd_streaming")) and not loras,
         first_frame=first,
         last_frame=last,
         refs=refs,
+        loras=loras,
         mode=mode,
     )
 
@@ -733,8 +760,15 @@ async def _execute_run(state: AppState, run_id: str) -> None:
 
             t0 = time.time()
             req = _request_from_body(
-                body, prompt, dest, first_frame=first, last_frame=last if i == 0 else None
+                body,
+                prompt,
+                dest,
+                state=state,
+                first_frame=first,
+                last_frame=last if i == 0 else None,
             )
+            if req.loras:
+                req.ssd_streaming = False
             if req.refs:
                 req.first_frame = None
                 req.last_frame = None
@@ -946,6 +980,7 @@ def create_app(
             "recommend_ssd_streaming": ssd,
             "metal4": bool(info.get("metal4")),
             "quality_presets": QUALITY_PRESET_LIST,
+            "lora_presets": lora_catalog(state.output_dir),
             "resolution_presets": RESOLUTION_PRESETS,
             "duration_presets": DURATION_PRESETS,
             "generation_modes": GENERATION_MODES,
@@ -961,6 +996,58 @@ def create_app(
             "model_note": note,
             "pyav_available": media_available(),
         }
+
+    @app.post("/api/loras/ensure")
+    async def api_lora_ensure(body: dict[str, Any]):
+        spec = normalize_lora_spec(str(body.get("spec") or body.get("url") or ""))
+        if not spec:
+            raise HTTPException(400, "spec or url is required")
+        try:
+            return await asyncio.to_thread(ensure_lora, spec)
+        except Exception as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/loras/custom")
+    async def api_lora_custom(body: dict[str, Any]):
+        spec = normalize_lora_spec(str(body.get("spec") or body.get("url") or ""))
+        if not spec:
+            raise HTTPException(400, "spec or url is required")
+        try:
+            scale = float(body.get("scale", 1.0))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "scale must be a number")
+        label = str(body.get("label") or "").strip() or _label_for_spec(spec)
+        entries = read_custom_loras(state.output_dir)
+        existing = next((e for e in entries if e.get("spec") == spec), None)
+        if existing is not None:
+            lid = str(existing["id"])
+            existing["label"] = label
+            existing["scale"] = scale
+        else:
+            lid = f"custom_{uuid.uuid4().hex[:8]}"
+            entries.append(
+                {"id": lid, "label": label, "spec": spec, "scale": scale, "custom": True}
+            )
+        write_custom_loras(state.output_dir, entries)
+        try:
+            await asyncio.to_thread(ensure_lora, spec)
+        except Exception as exc:
+            raise HTTPException(400, str(exc)) from exc
+        catalog = lora_catalog(state.output_dir)
+        preset = next((p for p in catalog if p.get("id") == lid), None)
+        return {
+            "ok": True,
+            "id": lid,
+            "reused": existing is not None,
+            "preset": preset,
+            "lora_presets": catalog,
+        }
+
+    @app.delete("/api/loras/custom/{lora_id}")
+    async def api_lora_delete(lora_id: str):
+        entries = [e for e in read_custom_loras(state.output_dir) if e["id"] != lora_id]
+        write_custom_loras(state.output_dir, entries)
+        return {"ok": True, "lora_presets": lora_catalog(state.output_dir)}
 
     @app.get("/api/clips")
     async def list_clips(chain_id: Optional[str] = None):

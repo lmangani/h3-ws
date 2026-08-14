@@ -3,7 +3,7 @@ import { clipDisplayPrompt, snapshotFromClip } from "./clipEditor";
 import { applyProgressEvent } from "./progress";
 import { captureVideoFrame, formatVideoTime } from "./frameCapture";
 import { RefList, refsAreValid } from "./RefList";
-import type { Clip, Config, LibraryFrame, PresetOption, ProgressState, QualityPreset, ReferenceItem } from "./types";
+import type { Clip, Config, LibraryFrame, LoraPreset, PresetOption, ProgressState, QualityPreset, ReferenceItem } from "./types";
 
 function resolutionGroups(presets: PresetOption[]): { group: string; items: PresetOption[] }[] {
   const order: { group: string; items: PresetOption[] }[] = [];
@@ -33,6 +33,103 @@ function fieldsFromPreset(preset: QualityPreset | undefined) {
     reuse: steps <= 7 ? 1 : (preset?.reuse ?? H3_DEFAULT_REUSE),
     tokenReduction: Boolean(preset?.token_reduction),
   };
+}
+
+function loraSelectionSummary(presets: LoraPreset[], selectedIds: string[]) {
+  const selected = presets.filter((p) => selectedIds.includes(p.id));
+  if (selected.length === 0) return "None";
+  if (selected.length === 1) {
+    const raw = selected[0].label.replace(/\s*\(default\)\s*$/i, "").trim();
+    return raw.length > 28 ? `${raw.slice(0, 27)}…` : raw;
+  }
+  return `${selected.length} LoRAs`;
+}
+
+function LoraMultiSelect({
+  presets,
+  selectedIds,
+  disabled,
+  onToggle,
+  onRemovePreset,
+}: {
+  presets: LoraPreset[];
+  selectedIds: string[];
+  disabled?: boolean;
+  onToggle: (id: string, checked: boolean) => void;
+  onRemovePreset: (preset: LoraPreset) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const summary = loraSelectionSummary(presets, selectedIds);
+  return (
+    <div className={`multi-select${open ? " is-open" : ""}`} ref={rootRef}>
+      <button
+        type="button"
+        className="multi-select-trigger"
+        disabled={disabled}
+        aria-expanded={open}
+        title={summary}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="multi-select-trigger-text">{summary}</span>
+      </button>
+      {open && (
+        <div className="multi-select-menu" role="listbox" aria-label="LoRA presets">
+          {presets.map((p) => {
+            const checked = selectedIds.includes(p.id);
+            return (
+              <div
+                key={p.id}
+                className={`multi-select-item${checked ? " is-selected" : ""}`}
+                role="option"
+                aria-selected={checked}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled}
+                  aria-label={p.label}
+                  onChange={(e) => onToggle(p.id, e.target.checked)}
+                />
+                <span
+                  className="multi-select-item-label"
+                  title={p.guidance ?? p.label}
+                  onClick={() => {
+                    if (!disabled) onToggle(p.id, !checked);
+                  }}
+                >
+                  {p.label}
+                </span>
+                {p.custom ? (
+                  <button
+                    type="button"
+                    className="lora-remove"
+                    title="Remove from list"
+                    disabled={disabled}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRemovePreset(p);
+                    }}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const API = "";
@@ -208,6 +305,14 @@ export default function App() {
   const [seed, setSeed] = useState("");
   const [ssdStreaming, setSsdStreaming] = useState(false);
   const [tokenReduction, setTokenReduction] = useState(true);
+  const [loraPresetIds, setLoraPresetIds] = useState<string[]>([]);
+  const [loraPresets, setLoraPresets] = useState<LoraPreset[]>([]);
+  const [customLoraUrl, setCustomLoraUrl] = useState("");
+  const [customLoraLabel, setCustomLoraLabel] = useState("");
+  const [customLoraScale, setCustomLoraScale] = useState("0.8");
+  const [addingCustomLora, setAddingCustomLora] = useState(false);
+  const [loraBusy, setLoraBusy] = useState(false);
+  const [loraActivity, setLoraActivity] = useState<string | null>(null);
   const [showOptions, setShowOptions] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -261,7 +366,11 @@ export default function App() {
   const previewCanvas = resolutionId === "256x256";
   const aggressiveInternal = resolutionId === "512x512-aggressive";
   const tokenReductionLocked =
-    previewCanvas || aggressiveInternal || quality === "aggressive" || (layers === 40 && reuse === 3);
+    previewCanvas ||
+    aggressiveInternal ||
+    quality === "aggressive" ||
+    (layers === 40 && reuse === 3) ||
+    loraPresetIds.length > 0;
   const closePreset = config?.quality_presets.find((p) => p.id === "close");
 
   useEffect(() => {
@@ -277,6 +386,7 @@ export default function App() {
         setReuse(fields.reuse);
         setTokenReduction(fields.tokenReduction);
         setSsdStreaming(false);
+        setLoraPresets(cfg.lora_presets ?? []);
         const defRes =
           cfg.resolution_presets.find((r) => r.id === "512x512") ??
           cfg.resolution_presets.find(
@@ -322,6 +432,101 @@ export default function App() {
     },
     [config],
   );
+
+  function applyLoraHints(preset: LoraPreset) {
+    if (preset.steps) setNumSteps(preset.steps);
+    if (preset.layers) setLayers(preset.layers);
+    if (preset.reuse) setReuse(preset.reuse);
+    if (preset.steps && preset.steps <= 7) setReuse(1);
+    setTokenReduction(false);
+    setSsdStreaming(false);
+  }
+
+  async function ensureLoraSpec(spec: string, label: string) {
+    setLoraBusy(true);
+    setLoraActivity(`Downloading ${label}…`);
+    try {
+      const r = await fetch(`${API}/api/loras/ensure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(typeof (err as { detail?: string }).detail === "string"
+          ? (err as { detail: string }).detail
+          : `LoRA download failed: ${label}`);
+      }
+      setLoraActivity(`${label} ready`);
+    } finally {
+      setLoraBusy(false);
+    }
+  }
+
+  async function toggleLoraPreset(id: string, checked: boolean) {
+    const preset = loraPresets.find((p) => p.id === id);
+    setLoraPresetIds((prev) => {
+      const next = checked ? [...prev.filter((x) => x !== id), id] : prev.filter((x) => x !== id);
+      return next;
+    });
+    if (checked && preset) {
+      applyLoraHints(preset);
+      try {
+        await ensureLoraSpec(preset.spec, preset.label);
+      } catch (e) {
+        setError(String(e));
+        setLoraActivity(String(e));
+      }
+    }
+  }
+
+  async function addCustomLora() {
+    const spec = customLoraUrl.trim();
+    if (!spec || addingCustomLora) return;
+    setAddingCustomLora(true);
+    try {
+      const r = await fetch(`${API}/api/loras/custom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          spec,
+          label: customLoraLabel.trim() || undefined,
+          scale: Number(customLoraScale) || 1,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(typeof (err as { detail?: string }).detail === "string"
+          ? (err as { detail: string }).detail
+          : "Could not add custom LoRA");
+      }
+      const data = (await r.json()) as { id: string; preset?: LoraPreset; lora_presets?: LoraPreset[] };
+      if (data.lora_presets) setLoraPresets(data.lora_presets);
+      if (data.id) {
+        setLoraPresetIds((prev) => (prev.includes(data.id) ? prev : [...prev, data.id]));
+        if (data.preset) applyLoraHints(data.preset);
+      }
+      setCustomLoraUrl("");
+      setCustomLoraLabel("");
+      setLoraActivity(`LoRA ready: ${data.preset?.label ?? spec}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAddingCustomLora(false);
+    }
+  }
+
+  async function removeLoraPreset(preset: LoraPreset) {
+    if (!preset.custom) return;
+    if (!confirm(`Remove custom LoRA "${preset.label}"?`)) return;
+    const r = await fetch(`${API}/api/loras/custom/${encodeURIComponent(preset.id)}`, {
+      method: "DELETE",
+    });
+    if (!r.ok) return;
+    const data = (await r.json()) as { lora_presets?: LoraPreset[] };
+    if (data.lora_presets) setLoraPresets(data.lora_presets);
+    setLoraPresetIds((prev) => prev.filter((id) => id !== preset.id));
+  }
 
   async function startNewProject() {
     setClips((prev) => {
@@ -513,7 +718,11 @@ export default function App() {
       autoconcat: isMultiClip,
       ssd_streaming: ssdStreaming,
       token_reduction: tokenReductionLocked ? false : tokenReduction,
+      loras: loraPresets
+        .filter((p) => loraPresetIds.includes(p.id))
+        .map((p) => ({ id: p.id, spec: p.spec, scale: p.scale })),
     };
+    if (loraPresetIds.length) body.ssd_streaming = false;
     if (resolution.render_width) body.render_width = resolution.render_width;
     if (resolution.render_height) body.render_height = resolution.render_height;
     if (seed.trim() !== "") body.seed = Number(seed);
@@ -877,12 +1086,73 @@ export default function App() {
                   </label>
                 </div>
 
+                <div className="lora-row">
+                  <div className="lora-row-select">
+                    <span className="lora-field-label">LoRA</span>
+                    <LoraMultiSelect
+                      presets={loraPresets}
+                      selectedIds={loraPresetIds}
+                      disabled={loraBusy || addingCustomLora || busy}
+                      onToggle={(id, checked) => void toggleLoraPreset(id, checked)}
+                      onRemovePreset={(preset) => void removeLoraPreset(preset)}
+                    />
+                  </div>
+                  <div className="lora-row-add">
+                    <input
+                      type="text"
+                      className="lora-add-url"
+                      placeholder="HF URL or path"
+                      aria-label="LoRA URL or file path"
+                      value={customLoraUrl}
+                      disabled={addingCustomLora}
+                      onChange={(e) => setCustomLoraUrl(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="lora-add-name"
+                      placeholder="Label"
+                      aria-label="LoRA display name"
+                      value={customLoraLabel}
+                      disabled={addingCustomLora}
+                      onChange={(e) => setCustomLoraLabel(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className="lora-add-scale"
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      aria-label="LoRA strength"
+                      title="Strength (0–2)"
+                      value={customLoraScale}
+                      disabled={addingCustomLora}
+                      onChange={(e) => setCustomLoraScale(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn-secondary btn-compact lora-add-btn"
+                      disabled={!customLoraUrl.trim() || addingCustomLora || loraBusy}
+                      onClick={() => void addCustomLora()}
+                    >
+                      {addingCustomLora ? "…" : "Add"}
+                    </button>
+                  </div>
+                </div>
+                {loraActivity && <p className="hint hint-inline">{loraActivity}</p>}
+                {loraPresetIds.length > 0 && (
+                  <p className="hint hint-inline">
+                    {loraPresets.find((p) => loraPresetIds.includes(p.id))?.guidance ??
+                      "LoRA is fused into DiT weights at load. SSD streaming stays off."}
+                  </p>
+                )}
+
                 <div className="options-checks">
                   <label className="check">
                     <input
                       type="checkbox"
-                      checked={ssdStreaming}
+                      checked={ssdStreaming && loraPresetIds.length === 0}
                       onChange={(e) => setSsdStreaming(e.target.checked)}
+                      disabled={loraPresetIds.length > 0}
                     />
                     SSD streaming (saves RAM, slower denoise)
                   </label>

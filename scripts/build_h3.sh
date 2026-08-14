@@ -18,6 +18,14 @@ if [[ -f "$PATCH" ]] && ! grep -q 'getenv("H3_AV")' "$SRC/h3_ffmpeg.c"; then
   echo "Applying H3_AV media-shim patch…"
   patch -p1 -d "$SRC" < "$PATCH"
 fi
+LORA_DIR="$ROOT/patches/h3-lora"
+if [[ -f "$LORA_DIR/h3_lora.c" ]]; then
+  cp -f "$LORA_DIR/h3_lora.c" "$LORA_DIR/h3_lora.h" "$SRC/"
+  if ! grep -q 'h3_lora.h' "$SRC/h3_weights.c"; then
+    echo "Applying DiT LoRA fuse patch…"
+    patch -p1 -d "$SRC" < "$LORA_DIR/engine.patch"
+  fi
+fi
 echo "Building h3.c with make -j${jobs} …"
 make -C "$SRC" -j"$jobs"
 if [[ -x "$SRC/h3" ]]; then

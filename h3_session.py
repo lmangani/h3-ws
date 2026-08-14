@@ -180,6 +180,8 @@ def build_session_argv(
         render_width=req.render_width,
         render_height=req.render_height,
     )
+    if req.loras and req.ssd_streaming:
+        raise ValueError("LoRA cannot be combined with --ssd-streaming")
     cmd = [
         str(h3_bin),
         "-d",
@@ -208,6 +210,8 @@ def build_session_argv(
         cmd.append("--ssd-streaming")
     elif req.int8_row_fc2:
         cmd.append("--use-int8-row-fc2")
+    for lora in req.loras:
+        cmd.extend(["--lora", f"{lora.path}:{lora.scale:.4g}"])
     if req.profile:
         cmd.append("--profile")
     return cmd

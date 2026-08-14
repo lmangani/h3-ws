@@ -16,7 +16,7 @@ This is a parallel of [ltx-ws](https://github.com/audiohacking/ltx-ws): **same U
 | Multi-clip chains + merge | Last-frame → `--first-frame`; optional Ref2VA continue |
 | Apple Silicon only | Metal / MPSGraph / TensorOps via h3.c |
 
-**Not in v1:** LoRA picker, face swap, IC-LoRA, LipDub, ID-LoRA, LTX retake/extend pipelines, CFG/STG, distilled vs HQ profiles, H3-Regenerate-2K (unreleased), hosted H3-Context-IR.
+**Not in v1:** face swap, IC-LoRA, LipDub, ID-LoRA, LTX retake/extend pipelines, CFG/STG, distilled vs HQ profiles, H3-Regenerate-2K (unreleased), hosted H3-Context-IR. **DiT LoRA picker is in:** catalog + HF download + `--lora` fuse at load (Tutu 20→8 NFE first).
 
 ---
 
@@ -109,6 +109,10 @@ UI generation modes for v1:
 The UI always exposes `--steps`, `--layers`, and `--reuse` (preset fills them; testers can then edit). `--steps` 50 on close is explicit: it is much more expensive than the default 20×50 path.
 
 Advanced (collapsed, not on the first row): `--core-reuse` (exclusive with reuse), `--token-reduction`, `--render-width` / `--render-height`, `--ssd-streaming`, `--use-int8-row-fc2` (M5), slower BF16 diagnostic flags only in CLI/env.
+
+### LoRA picker
+
+The UI catalog downloads FL2VA DiT adapters into `models/loras/` and passes `--lora PATH:SCALE` so h3.c can fuse `W += scale * (alpha/rank) * B @ A` at BF16 load. First builtin: [Tutu 20→8 NFE](https://huggingface.co/tutututututu/Tutu-MiniMax-H3-AudioVideo-20to8-NFE-LoRA) (step 100, strength 0.8, 8 steps). Not compatible with `--ssd-streaming`. h3.c still uses its own shifted Euler `--steps`; it does not reproduce ComfyUI ManualSigmas or video/audio shift 12/3.
 
 ### Resolution presets
 
