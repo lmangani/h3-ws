@@ -2,6 +2,9 @@
 
 #include "h3_safetensors.h"
 
+#ifndef ACCELERATE_NEW_LAPACK
+#define ACCELERATE_NEW_LAPACK 1
+#endif
 #include <Accelerate/Accelerate.h>
 #include <ctype.h>
 #include <math.h>
@@ -322,8 +325,8 @@ static int gemm_delta(const h3_lora_tensor *a, const h3_lora_tensor *b,
     uint64_t a1 = a->shape[1];
     uint64_t b0 = b->shape[0];
     uint64_t b1 = b->shape[1];
-    CBLAS_TRANSPOSE trans_b = CblasNoTrans;
-    CBLAS_TRANSPOSE trans_a = CblasNoTrans;
+    int trans_b = 0;
+    int trans_a = 0;
     uint64_t rank = 0;
     const float *B = b->data;
     const float *A = a->data;
@@ -335,21 +338,24 @@ static int gemm_delta(const h3_lora_tensor *a, const h3_lora_tensor *b,
         lda = (int)a1;
     } else if (b1 == out_rows && a0 == in_cols && b0 == a1) {
         rank = a1;
-        trans_b = CblasTrans;
-        trans_a = CblasTrans;
+        trans_b = 1;
+        trans_a = 1;
         ldb = (int)b1;
         lda = (int)a1;
     } else if (b0 == out_rows && a0 == in_cols && b1 == a1) {
         rank = b1;
-        trans_a = CblasTrans;
+        trans_a = 1;
         ldb = (int)b1;
         lda = (int)a1;
     } else {
         return 0;
     }
     if (!rank || rank > INT32_MAX) return 0;
-    cblas_sgemm(CblasRowMajor, trans_b, trans_a, (int)out_rows, (int)in_cols,
-                (int)rank, 1.0f, B, ldb, A, lda, 0.0f, delta, (int)in_cols);
+    cblas_sgemm(CblasRowMajor,
+                trans_b ? CblasTrans : CblasNoTrans,
+                trans_a ? CblasTrans : CblasNoTrans,
+                (int)out_rows, (int)in_cols, (int)rank, 1.0f, B, ldb, A, lda,
+                0.0f, delta, (int)in_cols);
     return 1;
 }
 
